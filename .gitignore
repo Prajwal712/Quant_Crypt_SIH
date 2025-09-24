@@ -1,3 +1,5 @@
 # Virtual Environment
 .venv/
-c
+# Google OAuth files - DO NOT COMMIT
+credentials.json
+token.json
