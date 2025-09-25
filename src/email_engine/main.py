@@ -25,7 +25,15 @@ def main():
             # Logic for sending an email
             recipient = input("Enter recipient's email: ")
             subject = input("Enter email subject: ")
-            body = input("Enter email body: ")
+            print("Enter email body (end with an empty line):")
+            lines = []
+            while True:
+                line = input()
+                if line == "":
+                    break
+                lines.append(line)
+            body = "\n".join(lines)
+
             
             # 'me' is a special value indicating the authenticated user
             sender = 'me'
