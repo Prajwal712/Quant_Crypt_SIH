@@ -1,0 +1,32 @@
+# Quantum-Encrypted Email System Requirements
+
+# Core Cryptography
+cryptography>=41.0.0
+
+# Web Framework for REST API
+Flask>=3.0.0
+Flask-CORS>=4.0.0
+
+# Gmail API
+google-auth>=2.23.0
+google-auth-oauthlib>=1.1.0
+google-auth-httplib2>=0.1.1
+google-api-python-client>=2.100.0
+
+# HTTP Requests
+requests>=2.31.0
+
+# GUI (included in Python standard library, but listing for documentation)
+# tkinter - comes with Python
+
+# Optional: For better password hashing
+argon2-cffi>=23.1.0
+
+# Optional: For enhanced security
+pycryptodome>=3.19.0
+
+# Development and Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+black>=23.9.0
+flake8>=6.1.0
