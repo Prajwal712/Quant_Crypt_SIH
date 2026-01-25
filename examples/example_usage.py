@@ -5,12 +5,13 @@ Demonstrates all 4 security levels
 import sys
 sys.path.append('..')
 
-from src.qkd.qkd_simulator import QKDChannel
+
 from src.key_management.key_manager import KeyManager, KeyExchangeProtocol
 from src.cryptography.security_levels import EncryptionEngine, SecurityLevel, generate_rsa_keypair
-from src.email_engine.quantum_email import QuantumEmailEngine
-from src.email_engine.auth import get_gmail_service
 
+
+
+from src.qkd.local_provider import LocalQKDProvider
 
 def example_1_basic_encryption():
     """
@@ -22,13 +23,14 @@ def example_1_basic_encryption():
     print("=" * 60)
 
     # Initialize components
-    qkd_channel = QKDChannel(key_length=256)
+    provider = LocalQKDProvider()
+
     sender_manager = KeyManager("alice")
     receiver_manager = KeyManager("bob")
     encryption_engine = EncryptionEngine()
 
     # Generate quantum key
-    key_exchange = KeyExchangeProtocol(qkd_channel)
+    key_exchange = KeyExchangeProtocol(provider)
     key_id, quantum_key = key_exchange.request_key(sender_manager, receiver_manager)
 
     print(f"✓ Quantum key generated: {key_id}")
@@ -45,8 +47,10 @@ def example_1_basic_encryption():
     print(f"  Ciphertext length: {len(ciphertext)} bytes")
 
     # Decrypt message
-    retrieved_key = receiver_manager.get_key(key_id)
-    plaintext = encryption_engine.decrypt(ciphertext, retrieved_key, metadata)
+    retrieved = receiver_manager.get_key(key_id)
+    quantum_key = retrieved["key"]
+
+    plaintext = encryption_engine.decrypt(ciphertext, quantum_key, metadata)
 
     print(f"✓ Message decrypted: {plaintext.decode('utf-8')}")
     print()
@@ -62,13 +66,14 @@ def example_2_standard_encryption():
     print("=" * 60)
 
     # Initialize components
-    qkd_channel = QKDChannel(key_length=256)
+    provider = LocalQKDProvider(key_length=256)
+
     sender_manager = KeyManager("alice")
     receiver_manager = KeyManager("bob")
     encryption_engine = EncryptionEngine()
 
     # Generate quantum key
-    key_exchange = KeyExchangeProtocol(qkd_channel)
+    key_exchange = KeyExchangeProtocol(provider)
     key_id, quantum_key = key_exchange.request_key(sender_manager, receiver_manager)
 
     print(f"✓ Quantum key generated: {key_id}")
@@ -86,8 +91,11 @@ def example_2_standard_encryption():
     print(f"  Ciphertext length: {len(ciphertext)} bytes")
 
     # Decrypt message
-    retrieved_key = receiver_manager.get_key(key_id)
-    plaintext = encryption_engine.decrypt(ciphertext, retrieved_key, metadata)
+    retrieved = receiver_manager.get_key(key_id)
+    quantum_key = retrieved["key"]
+
+    plaintext = encryption_engine.decrypt(ciphertext, quantum_key, metadata)
+
 
     print(f"✓ Message decrypted: {plaintext.decode('utf-8')}")
     print()
@@ -103,13 +111,14 @@ def example_3_high_security():
     print("=" * 60)
 
     # Initialize components
-    qkd_channel = QKDChannel(key_length=256)
+    provider = LocalQKDProvider()
+       
     sender_manager = KeyManager("alice")
     receiver_manager = KeyManager("bob")
     encryption_engine = EncryptionEngine()
 
     # Generate quantum key
-    key_exchange = KeyExchangeProtocol(qkd_channel)
+    key_exchange = KeyExchangeProtocol(provider) 
     key_id, quantum_key = key_exchange.request_key(sender_manager, receiver_manager)
 
     print(f"✓ Quantum key generated: {key_id}")
@@ -127,8 +136,10 @@ def example_3_high_security():
     print(f"  Ciphertext length: {len(ciphertext)} bytes")
 
     # Decrypt message
-    retrieved_key = receiver_manager.get_key(key_id)
-    plaintext = encryption_engine.decrypt(ciphertext, retrieved_key, metadata)
+    retrieved = receiver_manager.get_key(key_id)
+    quantum_key = retrieved["key"]
+
+    plaintext = encryption_engine.decrypt(ciphertext, quantum_key, metadata)
 
     print(f"✓ Message decrypted: {plaintext.decode('utf-8')}")
     print()
@@ -144,7 +155,8 @@ def example_4_maximum_security():
     print("=" * 60)
 
     # Initialize components
-    qkd_channel = QKDChannel(key_length=256)
+    provider = LocalQKDProvider()
+
     sender_manager = KeyManager("alice")
     receiver_manager = KeyManager("bob")
     encryption_engine = EncryptionEngine()
@@ -154,7 +166,7 @@ def example_4_maximum_security():
     print("✓ RSA key pair generated (2048 bits)")
 
     # Generate quantum key
-    key_exchange = KeyExchangeProtocol(qkd_channel)
+    key_exchange = KeyExchangeProtocol(provider)
     key_id, quantum_key = key_exchange.request_key(sender_manager, receiver_manager)
 
     print(f"✓ Quantum key generated: {key_id}")
@@ -173,10 +185,12 @@ def example_4_maximum_security():
     print(f"  Ciphertext length: {len(ciphertext)} bytes")
 
     # Decrypt message
-    retrieved_key = receiver_manager.get_key(key_id)
+    retrieved = receiver_manager.get_key(key_id)
+    quantum_key = retrieved["key"]
+
     plaintext = encryption_engine.decrypt(
         ciphertext,
-        retrieved_key,
+        quantum_key,
         metadata,
         private_key=private_key
     )
@@ -198,7 +212,8 @@ def example_5_complete_email_flow():
     # To send real emails, you need to authenticate with Gmail API
 
     # Initialize all components
-    qkd_channel = QKDChannel(key_length=256)
+    provider = LocalQKDProvider(key_length=256)
+
     sender_manager = KeyManager("alice@example.com")
     receiver_manager = KeyManager("bob@example.com")
     encryption_engine = EncryptionEngine()
@@ -206,7 +221,7 @@ def example_5_complete_email_flow():
     print("✓ System components initialized")
 
     # Simulate key exchange
-    key_exchange = KeyExchangeProtocol(qkd_channel)
+    key_exchange = KeyExchangeProtocol(provider)
     key_id, quantum_key = key_exchange.request_key(sender_manager, receiver_manager)
 
     print(f"✓ QKD channel established, Key ID: {key_id}")
@@ -238,8 +253,14 @@ def example_5_complete_email_flow():
     print("✓ Email transmitted via SMTP")
 
     # Receiver side: Decrypt email
-    retrieved_key = receiver_manager.get_key(key_id)
-    decrypted_content = encryption_engine.decrypt(ciphertext, retrieved_key, metadata)
+    retrieved = receiver_manager.get_key(key_id)
+    quantum_key = retrieved["key"]
+
+    decrypted_content = encryption_engine.decrypt(
+        ciphertext,
+        quantum_key,
+        metadata
+    )
 
     print("✓ Email decrypted successfully")
     print("\nDecrypted content:")
@@ -260,13 +281,14 @@ def example_6_key_management():
 
     # Initialize key manager
     manager = KeyManager("alice")
-    qkd_channel = QKDChannel()
+    provider = LocalQKDProvider()
+    exchange = KeyExchangeProtocol(provider)
 
     # Generate multiple keys
     print("Generating quantum keys...")
     for i in range(3):
-        quantum_key, key_id = qkd_channel.establish_key_pair("alice", "bob")
-        manager.store_key(quantum_key, key_id, {'index': i})
+        key_id, quantum_key = exchange.request_key(manager, KeyManager("bob"))
+
         print(f"  ✓ Key {i+1}: {key_id}")
 
     # List all keys
@@ -280,9 +302,9 @@ def example_6_key_management():
     # Retrieve and use a key
     print("\nRetrieving key...")
     key_id = keys[0]['key_id']
-    retrieved_key = manager.get_key(key_id)
+    retrieved = manager.get_key(key_id)
     print(f"  ✓ Retrieved key: {key_id}")
-    print(f"  Key length: {len(retrieved_key)} bytes")
+    print(f"  Key length: {len(retrieved['key'])} bytes")
 
     # Cleanup
     print("\nCleaning up expired keys...")

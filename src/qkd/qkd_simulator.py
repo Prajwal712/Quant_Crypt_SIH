@@ -135,18 +135,32 @@ class QKDChannel:
         self.qkd_simulator = QKDSimulator(key_length)
         self.key_store = {}
 
-    def establish_key_pair(self, manager_a_id: str, manager_b_id: str) -> Tuple[bytes, str]:
+    def establish_key_pair(
+        self,
+        manager_a_id: str,
+        manager_b_id: str,
+        key_length: int = None
+    ) -> Tuple[bytes, str]:
         """
-        Establish a quantum key pair between two managers
-        Returns: (quantum_key, key_id)
+        Establish a quantum key pair between two managers.
+        Supports variable key lengths (ETSI / provider-compatible).
         """
+
+        if key_length is not None:
+            # Temporarily override simulator key length
+            original_length = self.qkd_simulator.key_length
+            self.qkd_simulator.key_length = key_length
+
         quantum_key, key_id = self.qkd_simulator.generate_quantum_key()
 
-        # Store key association
+        if key_length is not None:
+            # Restore original length
+            self.qkd_simulator.key_length = original_length
+
         self.key_store[key_id] = {
-            'key': quantum_key,
-            'manager_a': manager_a_id,
-            'manager_b': manager_b_id
+            "key": quantum_key,
+            "manager_a": manager_a_id,
+            "manager_b": manager_b_id
         }
 
         return quantum_key, key_id

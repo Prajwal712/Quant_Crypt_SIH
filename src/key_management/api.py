@@ -113,14 +113,15 @@ class KeyManagementAPI:
         """
         Retrieve a quantum key by ID
         """
-        quantum_key = self.key_manager.get_key(key_id)
+        key_entry = self.key_manager.get_key(key_id)
 
-        if quantum_key is None:
+        if key_entry is None:
             return jsonify({'error': 'Key not found or expired'}), 404
 
         return jsonify({
             'key_id': key_id,
-            'quantum_key': quantum_key.hex()
+            'quantum_key': key_entry["key"].hex(),
+            'metadata': key_entry["metadata"]
         }), 200
 
     def list_keys(self):
