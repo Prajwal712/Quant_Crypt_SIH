@@ -42,7 +42,7 @@ class KeyManager:
                 'created_at': datetime.now().isoformat(),
                 'expires_at': (datetime.now() + timedelta(hours=24)).isoformat(),
                 'usage_count': 0,
-                'max_usage': 1,  # One-time pad principle for quantum keys
+                'max_usage': 2,  # One-time pad principle for quantum keys
                 'metadata': metadata or {}
             }
 

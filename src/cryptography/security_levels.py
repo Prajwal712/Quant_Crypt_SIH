@@ -104,7 +104,7 @@ class EncryptionEngine:
         Enhanced security with additional entropy
         """
         # Mix quantum key with additional entropy
-        mixed_key = self._mix_keys(quantum_key, secrets.token_bytes(32))
+        mixed_key = hashlib.sha256(quantum_key).digest()
         chacha_key = self._derive_key(mixed_key, 32)
 
         # Generate nonce for ChaCha20
@@ -129,7 +129,7 @@ class EncryptionEngine:
         """
         # Note: In real implementation, the mixed entropy should be transmitted securely
         # For now, we'll use a deterministic mixing that both parties can reproduce
-        mixed_key = self._mix_keys(quantum_key, secrets.token_bytes(32))
+        mixed_key = hashlib.sha256(quantum_key).digest()
         chacha_key = self._derive_key(mixed_key, 32)
 
         nonce = bytes.fromhex(metadata['nonce'])

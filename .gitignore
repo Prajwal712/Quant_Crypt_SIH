@@ -3,3 +3,17 @@
 # Google OAuth files - DO NOT COMMIT
 credentials.json
 token.json
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Local key storage
+key_store/
+
+# Credentials
+token.json
+credentials.json
+*.crt
+*.key
+*.pem

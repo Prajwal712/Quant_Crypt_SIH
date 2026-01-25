@@ -1,6 +1,6 @@
 # receiver.py
 import base64
-from auth import get_gmail_service
+from .auth import get_gmail_service
 
 def get_latest_email(service, user_id='me'):
     try:
