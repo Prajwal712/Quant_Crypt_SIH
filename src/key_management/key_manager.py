@@ -13,6 +13,11 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from threading import Lock
 
+from src.qkd.qukaydee_provider import (
+    QuKayDeeProvider,
+    QuKayDeeConfig,
+)
+
 
 # =========================
 # Key Manager (KME)
@@ -24,8 +29,14 @@ class KeyManager:
     ACTIVE -> CONSUMED / EXPIRED -> CLEANED
     """
 
-    def __init__(self, manager_id: str, storage_path: Optional[str] = None):
+    def __init__(
+        self,
+        manager_id: str,
+        storage_path: Optional[str] = None,
+        qkd_provider: Optional[QuKayDeeProvider] = None
+    ):
         self.manager_id = manager_id
+        self.qkd_provider = qkd_provider
         self.keys: Dict[str, dict] = {}
         self.lock = Lock()
 
@@ -41,19 +52,32 @@ class KeyManager:
     # Store Key
     # -------------------------
 
-    def store_key(self, key: bytes, key_id: str, metadata: Optional[dict] = None) -> bool:
+    def store_key(
+        self,
+        key: bytes,
+        key_id: str,
+        metadata: Optional[dict] = None,
+        expires_in: Optional[int] = None
+    ) -> bool:
         """
         Store a quantum key (single-use).
         """
         with self.lock:
             if key_id in self.keys:
                 return False
+            
+
+            expires_at = (
+                datetime.utcnow() + timedelta(seconds=expires_in)
+                if expires_in
+                else datetime.utcnow() + timedelta(minutes=10)
+            )
 
             entry = {
                 "key_id": key_id,
                 "key": key.hex(),
                 "created_at": datetime.utcnow().isoformat(),
-                "expires_at": (datetime.utcnow() + timedelta(hours=24)).isoformat(),
+                "expires_at": expires_at.isoformat(),
                 "usage_count": 0,
                 "max_usage": 1,              # QKD keys are single-use
                 "state": "ACTIVE",           # ACTIVE | CONSUMED | EXPIRED
@@ -182,6 +206,73 @@ class KeyManager:
                 self.keys[key_id] = json.load(f)
 
 
+
+
+    def request_quantum_key(
+        self,
+        slave_sae_id: str,
+        key_length: int = 256
+    ) -> Tuple[str, bytes]:
+        """
+        Master SAE requests a fresh quantum key (ETSI enc_keys).
+        """
+
+        if not self.qkd_provider:
+            raise RuntimeError("No QKD provider configured")
+
+        key_id, key, meta = self.qkd_provider.request_key(
+            sender_id=self.manager_id,
+            receiver_id=slave_sae_id,
+            key_size_bits=key_length
+        )
+
+        self.store_key(
+            key,
+            key_id,
+            metadata={
+                "peer_sae": slave_sae_id,
+                "role": "master",
+                "key_length": key_length,
+                **meta,
+            },
+            expires_in=meta.get("expires_in")
+        )
+
+        return key_id, key
+    
+
+
+    def retrieve_quantum_key(
+        self,
+        master_sae_id: str,
+        key_id: str
+    ) -> bytes:
+        """
+        Slave SAE retrieves a key using key_ID (ETSI dec_keys).
+        """
+
+        if not self.qkd_provider:
+            raise RuntimeError("No QKD provider configured")
+
+        key, meta = self.qkd_provider.retrieve_key(
+            sender_id=master_sae_id,
+            key_id=key_id
+        )
+
+        self.store_key(
+            key,
+            key_id,
+            metadata={
+                "peer_sae": master_sae_id,
+                "role": "slave",
+                **meta,
+            },
+            expires_in=meta.get("expires_in")
+        )
+
+        return key
+
+
 # =========================
 # Key Exchange Protocol
 # =========================
@@ -192,6 +283,10 @@ class KeyExchangeProtocol:
     """
 
     def __init__(self, qkd_provider):
+        if isinstance(qkd_provider, QuKayDeeProvider):
+            raise RuntimeError(
+                "KeyExchangeProtocol is not valid for ETSI QKD providers"
+            )
         self.qkd_provider = qkd_provider
 
     def request_key(
@@ -210,26 +305,18 @@ class KeyExchangeProtocol:
             key_length=key_length
         )
 
+        # Local simulator ONLY (BB84 / demo)
         sender_manager.store_key(
             quantum_key,
             key_id,
             {
                 "peer": receiver_manager.manager_id,
-                "purpose": "email_encryption",
+                "purpose": "simulated_exchange",
                 "key_length": key_length,
-                "role": "sender"
+                "role": "simulator_sender"
             }
         )
 
-        receiver_manager.store_key(
-            quantum_key,
-            key_id,
-            {
-                "peer": sender_manager.manager_id,
-                "purpose": "email_encryption",
-                "key_length": key_length,
-                "role": "receiver"
-            }
-        )
+        
 
         return key_id, quantum_key
