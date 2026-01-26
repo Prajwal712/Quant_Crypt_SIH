@@ -2,6 +2,8 @@ from auth import get_gmail_service
 from sender import create_message, send_email
 from receiver import get_latest_email
 
+
+
 def main():
     """
     Provides a command-line interface to send or receive emails.
