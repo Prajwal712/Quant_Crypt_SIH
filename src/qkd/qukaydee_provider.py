@@ -95,7 +95,10 @@ class QuKayDeeClient:
                 method=method,
                 url=url,
                 params=params,
-                headers={"Accept": "application/json"},
+                headers={
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                },
                 cert=(self.cfg.sae_cert, self.cfg.sae_key),
                 verify=self.cfg.server_ca_cert,
                 timeout=self.cfg.timeout_seconds,
