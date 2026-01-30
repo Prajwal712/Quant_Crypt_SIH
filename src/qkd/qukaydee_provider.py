@@ -1,297 +1,123 @@
-"""
-QuKayDee QKD Provider
-ETSI GS QKD 014 v1.1.1 compliant client
-
-This provider integrates QuKayDee (cloud QKD simulator)
-as a Key Management backend using mutual TLS.
-"""
-
-from __future__ import annotations
-
-import base64
-
-from dataclasses import dataclass
-from typing import Dict, List, Tuple, Optional
-
 import requests
-from requests import Response
+import json
+import base64
+import urllib3
+from typing import Tuple, Dict, Optional
 
-from src.qkd.provider import QKDProvider
+# Suppress warnings for self-signed CAs (common in private QKD networks)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-
-# =========================
-# Exceptions
-# =========================
-
-class QuKayDeeError(Exception):
-    """Base exception for QuKayDee provider."""
-
-
-class QuKayDeeHTTPError(QuKayDeeError):
-    """HTTP-level failure."""
-
-
-class QuKayDeeAPIError(QuKayDeeError):
-    """ETSI QKD 014 API-level error."""
-
-
-# =========================
-# Config
-# =========================
-
-@dataclass
-class QuKayDeeConfig:
+class QuKayDeeProvider:
     """
-    Runtime configuration for QuKayDee.
-
-    ALL paths are placeholders until real certs are added.
+    Implements ETSI GS QKD 014 API calls for QuKayDee.
+    Handles mutual TLS (mTLS) authentication and key parsing.
     """
-    account_id: str
+    def __init__(self, host: str, cert_path: str, key_path: str, ca_path: str):
+        self.host = host.rstrip("/")
+        # Tuple for client authentication: (public_cert, private_key)
+        self.cert = (cert_path, key_path)
+        # Path to the Server CA to verify we are talking to the real KME
+        self.verify = ca_path
 
-    # KME + SAE identity
-    kme_id: str          # e.g. "kme-1" or "kme-2"
-    sae_id: str          # e.g. "sae-1" or "sae-2"
-
-    # TLS assets
-    server_ca_cert: str  # account-<ACCOUNT_ID>-server-ca-qukaydee-com.crt
-    sae_cert: str        # sae-1.crt or sae-2.crt
-    sae_key: str         # sae-1.key or sae-2.key
-
-    # Defaults
-    timeout_seconds: int = 10
-
-    @property
-    def base_url(self) -> str:
-        return (
-            f"https://{self.kme_id}.acct-{self.account_id}"
-            f".etsi-qkd-api.qukaydee.com/api/v1"
-        )
-
-
-# =========================
-# Low-level ETSI QKD client
-# =========================
-
-class QuKayDeeClient:
-    """
-    Thin ETSI GS QKD 014 REST client.
-    """
-
-    def __init__(self, cfg: QuKayDeeConfig):
-        self.cfg = cfg
-
-    # ---------- helpers ----------
-
-    def _request(
-        self,
-        method: str,
-        path: str,
-        params: Dict | None = None,
-    ) -> Dict:
-        url = self.cfg.base_url + path
+    def request_key(self, sender_id: str, receiver_id: str, key_size_bits: int = 256) -> Tuple[str, bytes, Dict]:
+        """
+        Equivalent to the Sender (Alice) workflow.
+        Calls: GET /api/v1/keys/{slave_sae_id}/enc_keys
+        """
+        # Endpoint: Request a key to share with the receiver (slave_sae_id)
+        url = f"{self.host}/api/v1/keys/{receiver_id}/enc_keys"
+        
+        # Some implementations accept size requests, others default to configuration
+        params = {"size": key_size_bits}
 
         try:
-            resp: Response = requests.request(
-                method=method,
-                url=url,
-                params=params,
-                headers={
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                },
-                cert=(self.cfg.sae_cert, self.cfg.sae_key),
-                verify=self.cfg.server_ca_cert,
-                timeout=self.cfg.timeout_seconds,
+            print(f"📡 [QuKayDee] Requesting enc_key for peer {receiver_id}...")
+            response = requests.get(
+                url, 
+                params=params, 
+                cert=self.cert, 
+                verify=self.verify
             )
-        except requests.RequestException as e:
-            raise QuKayDeeHTTPError(str(e)) from e
+            response.raise_for_status()
+            
+            data = response.json()
+            # ETSI 014 returns a list of keys, we take the first one
+            key_data = data["keys"][0]
+            
+            # Handle variable capitalization in API responses (key_id vs key_ID)
+            key_id = key_data.get("key_id") or key_data.get("key_ID")
+            key_b64 = key_data.get("key")
+            
+            if not key_id or not key_b64:
+                raise ValueError("Response missing 'key_ID' or 'key' field")
 
-        if not resp.ok:
-            raise QuKayDeeHTTPError(
-                f"HTTP {resp.status_code}: {resp.text}"
-            )
-
-        data = resp.json()
-
-        # ETSI error model
-        if "error" in data:
-            raise QuKayDeeAPIError(str(data["error"]))
-
-        if "errors" in data and data["errors"]:
-            raise QuKayDeeAPIError(str(data["errors"]))
-
-        return data
-
-    # ---------- ETSI endpoints ----------
-
-    def get_status(self, slave_sae_id: str) -> Dict:
-        """
-        GET /keys/{slave_sae_id}/status
-        """
-        return self._request(
-            "GET",
-            f"/keys/{slave_sae_id}/status",
-        )
-
-    def get_keys(
-        self,
-        slave_sae_id: str,
-        number: int,
-        size_bits: int,
-    ) -> List[Dict]:
-        """
-        POST /keys/{slave_sae_id}/enc_keys
-        """
-        data = self._request(
-            "POST",
-            f"/keys/{slave_sae_id}/enc_keys",
-            params={"number": number, "size": size_bits},
-        )
-        return data.get("keys", [])
-
-    def get_keys_by_id(
-        self,
-        master_sae_id: str,
-        key_ids: List[str],
-    ) -> List[Dict]:
-        """
-        GET /keys/{master_sae_id}/dec_keys
-        """
-        keys: List[Dict] = []
-
-        for key_id in key_ids:
-            data = self._request(
-                "GET",
-                f"/keys/{master_sae_id}/dec_keys",
-                params={"key_ID": key_id},
-            )
-            keys.extend(data.get("keys", []))
-
-        return keys
-
-
-# =========================
-# High-level Provider
-# =========================
-
-class QuKayDeeProvider(QKDProvider):
-    """
-    High-level QKDProvider implementation used by MailQ.
-
-    This class enforces:
-    - Correct call sequence
-    - Key ID propagation
-    - Base64 decoding
-    """
-
-    def __init__(self, config: QuKayDeeConfig):
-        self.cfg = config
-        self.client = QuKayDeeClient(config)
-
-    # ---------- Master SAE (Sender) ----------
-
-    """
-    NOTE: sender_id is validated implicitly via mTLS certificate.
-    It is not sent over the wire per ETSI QKD 014.
-    """
-
-    def request_key(
-        self,
-        sender_id: str,
-        receiver_id: str,
-        key_size_bits: int = 1024,
-    ) -> Tuple[str, bytes, Dict]:
-        """
-        Master SAE flow:
-        1. Status
-        2. enc_keys
-        3. Return (key_id, key_bytes)
-        """
-
-        if sender_id != self.cfg.sae_id:
-            raise QuKayDeeError(
-                f"Configured SAE ({self.cfg.sae_id}) cannot act as {sender_id}"
-            )
-
-        # 1️⃣ Status check
-        status = self.client.get_status(receiver_id)
-
-        if status.get("stored_key_count", 0) <= 0:
-            raise QuKayDeeError("No keys available in key stream")
-
-        max_size = status.get("max_key_size", key_size_bits)
-        if key_size_bits > max_size:
-            raise QuKayDeeError(
-                f"Requested key too large ({key_size_bits} > {max_size})"
-            )
-
-        # 2️⃣ Request key
-        keys = self.client.get_keys(
-            slave_sae_id=receiver_id,
-            number=1,
-            size_bits=key_size_bits,
-        )
-
-        if not keys:
-            raise QuKayDeeError("No keys returned by enc_keys")
-
-        key_entry = keys[0]
-        key_id = key_entry["key_ID"]
-        key_b64 = key_entry["key"]
-
-        # 3️⃣ Decode key material
-        try:
+            # Decode Base64 key to raw bytes for the crypto engine
             key_bytes = base64.b64decode(key_b64)
+            
+            metadata = {
+                "source": "QuKayDee",
+                "protocol": "ETSI_014",
+                "key_size": len(key_bytes) * 8
+            }
+            
+            print(f"✅ Key obtained: {key_id}")
+            return key_id, key_bytes, metadata
+
         except Exception as e:
-            raise QuKayDeeError("Invalid Base64 key") from e
+            print(f"❌ [QuKayDee] Request Failed: {e}")
+            if 'response' in locals():
+                print(f"Server Response: {response.text}")
+            raise e
 
-        expires_in = status.get("key_expiry_time", 600)
-
-        return key_id, key_bytes, {
-            "expires_in": expires_in,
-            "source": "qukaydee",
-            "standard": "ETSI-GS-QKD-014"
-        }
-
-    # ---------- Slave SAE (Receiver) ----------
-
-    """
-    NOTE: sender_id is validated implicitly via mTLS certificate.
-    It is not sent over the wire per ETSI QKD 014.
-    """
-
-
-    def retrieve_key(
-        self,
-        sender_id: str,
-        key_id: str,
-    ) -> Tuple[bytes, Dict]:
+    def retrieve_key(self, sender_id: str, key_id: str) -> Tuple[bytes, Dict]:
         """
-        Slave SAE flow:
-        dec_keys using key_ID
+        Equivalent to the Receiver (Bob) workflow.
+        Calls: GET /api/v1/keys/{master_sae_id}/dec_keys
         """
-
-        if self.cfg.sae_id == sender_id:
-            raise QuKayDeeError(
-                "Slave SAE cannot retrieve keys it originally requested"
-            )
-
-        keys = self.client.get_keys_by_id(
-            master_sae_id=sender_id,
-            key_ids=[key_id],
-        )
-
-        if not keys:
-            raise QuKayDeeError("Key not found or expired")
-
-        key_b64 = keys[0]["key"]
+        # Endpoint: Retrieve a specific key created by the sender (master_sae_id)
+        url = f"{self.host}/api/v1/keys/{sender_id}/dec_keys"
+        
+        # Try lowercase 'key_id' first (standard compliant)
+        params = {"key_id": key_id}
 
         try:
+            print(f"📡 [QuKayDee] Fetching dec_key {key_id} from {sender_id}...")
+            response = requests.get(
+                url, 
+                params=params, 
+                cert=self.cert, 
+                verify=self.verify
+            )
+            
+            # If 404, retry with 'key_ID' (some implementations differ)
+            if response.status_code == 404:
+                 print("   (404 on 'key_id', retrying with 'key_ID'...)")
+                 response = requests.get(
+                     url, 
+                     params={"key_ID": key_id}, 
+                     cert=self.cert, 
+                     verify=self.verify
+                 )
+            
+            response.raise_for_status()
+            
+            data = response.json()
+            key_data = data["keys"][0]
+            
+            key_b64 = key_data.get("key")
             key_bytes = base64.b64decode(key_b64)
-        except Exception as e:
-            raise QuKayDeeError("Invalid Base64 key") from e
+            
+            metadata = {
+                "source": "QuKayDee",
+                "protocol": "ETSI_014",
+                "key_size": len(key_bytes) * 8
+            }
+            
+            print(f"✅ Key retrieved successfully.")
+            return key_bytes, metadata
 
-        return key_bytes, {
-            "source": "qukaydee",
-            "standard": "ETSI-GS-QKD-014"
-        }
+        except Exception as e:
+            print(f"❌ [QuKayDee] Retrieve Failed: {e}")
+            if 'response' in locals():
+                print(f"Server Response: {response.text}")
+            raise e

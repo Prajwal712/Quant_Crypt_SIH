@@ -1,9 +1,7 @@
 """
 Key Management Module
 Manages quantum keys with secure storage and lifecycle management.
-
-ETSI GS QKD 014 aligned (conceptually)
-QuKayDee-compatible architecture
+ETSI GS QKD 014 aligned.
 """
 
 import secrets
@@ -13,15 +11,9 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from threading import Lock
 
-from src.qkd.qukaydee_provider import (
-    QuKayDeeProvider,
-    QuKayDeeConfig,
-)
+# Import the new provider class
+from src.qkd.qukaydee_provider import QuKayDeeProvider
 
-
-# =========================
-# Key Manager (KME)
-# =========================
 
 class KeyManager:
     """
@@ -40,7 +32,7 @@ class KeyManager:
         self.keys: Dict[str, dict] = {}
         self.lock = Lock()
 
-        # Persistent storage
+        # Persistent storage setup
         if storage_path:
             self.storage_path = Path(storage_path)
         else:
@@ -49,7 +41,73 @@ class KeyManager:
         self.storage_path.mkdir(parents=True, exist_ok=True)
 
     # -------------------------
-    # Store Key
+    # QKD Integration Methods
+    # -------------------------
+
+    def request_quantum_key(
+        self,
+        slave_sae_id: str,
+        key_length: int = 256
+    ) -> Tuple[str, bytes]:
+        """
+        Master SAE (Alice) requests a fresh quantum key from her KME.
+        """
+        if not self.qkd_provider:
+            raise RuntimeError("No QKD provider configured for this KeyManager")
+
+        # 1. Get from ETSI API
+        key_id, key_bytes, meta = self.qkd_provider.request_key(
+            sender_id=self.manager_id,
+            receiver_id=slave_sae_id,
+            key_size_bits=key_length
+        )
+
+        # 2. Store locally
+        self.store_key(
+            key_bytes,
+            key_id,
+            metadata={
+                "peer_sae": slave_sae_id,
+                "role": "master",
+                "key_length": key_length,
+                **meta,
+            }
+        )
+
+        return key_id, key_bytes
+
+    def retrieve_quantum_key(
+        self,
+        master_sae_id: str,
+        key_id: str
+    ) -> bytes:
+        """
+        Slave SAE (Bob) retrieves a specific key from his KME using the ID.
+        """
+        if not self.qkd_provider:
+            raise RuntimeError("No QKD provider configured for this KeyManager")
+
+        # 1. Get from ETSI API
+        key_bytes, meta = self.qkd_provider.retrieve_key(
+            sender_id=master_sae_id,
+            key_id=key_id
+        )
+
+        # 2. Store locally
+        self.store_key(
+            key_bytes,
+            key_id,
+            metadata={
+                "peer_sae": master_sae_id,
+                "role": "slave",
+                **meta,
+            }
+        )
+
+        return key_bytes
+
+    # -------------------------
+    # Local Storage & Lifecycle
     # -------------------------
 
     def store_key(
@@ -59,13 +117,9 @@ class KeyManager:
         metadata: Optional[dict] = None,
         expires_in: Optional[int] = None
     ) -> bool:
-        """
-        Store a quantum key (single-use).
-        """
         with self.lock:
             if key_id in self.keys:
                 return False
-            
 
             expires_at = (
                 datetime.utcnow() + timedelta(seconds=expires_in)
@@ -79,8 +133,7 @@ class KeyManager:
                 "created_at": datetime.utcnow().isoformat(),
                 "expires_at": expires_at.isoformat(),
                 "usage_count": 0,
-                "max_usage": 1,              # QKD keys are single-use
-                "state": "ACTIVE",           # ACTIVE | CONSUMED | EXPIRED
+                "state": "ACTIVE",
                 "metadata": metadata or {}
             }
 
@@ -88,15 +141,7 @@ class KeyManager:
             self._persist_key(key_id, entry)
             return True
 
-    # -------------------------
-    # Retrieve Key
-    # -------------------------
-
     def get_key(self, key_id: str) -> Optional[dict]:
-        """
-        Retrieve a quantum key.
-        Returns key material + metadata.
-        """
         with self.lock:
             if key_id not in self.keys:
                 self._load_key(key_id)
@@ -106,17 +151,14 @@ class KeyManager:
 
             entry = self.keys[key_id]
 
-            # Expiration check
             if datetime.utcnow() > datetime.fromisoformat(entry["expires_at"]):
                 entry["state"] = "EXPIRED"
                 self._persist_key(key_id, entry)
                 return None
 
-            # Usage check
             if entry["state"] != "ACTIVE":
                 return None
 
-            # Consume key
             entry["usage_count"] += 1
             entry["state"] = "CONSUMED"
             self._persist_key(key_id, entry)
@@ -127,72 +169,17 @@ class KeyManager:
                 "metadata": entry["metadata"]
             }
 
-    # -------------------------
-    # Delete Key (secure)
-    # -------------------------
-
     def delete_key(self, key_id: str) -> bool:
-        """
-        Securely delete a key (memory + disk).
-        """
         with self.lock:
             if key_id not in self.keys:
                 return False
-
             del self.keys[key_id]
-
             key_file = self.storage_path / f"{key_id}.key"
             if key_file.exists():
                 with open(key_file, "wb") as f:
                     f.write(secrets.token_bytes(1024))
                 key_file.unlink()
-
             return True
-
-    # -------------------------
-    # List Keys
-    # -------------------------
-
-    def list_keys(self) -> list:
-        """
-        List all keys with metadata (no key material).
-        """
-        with self.lock:
-            return [
-                {
-                    "key_id": key_id,
-                    "created_at": entry["created_at"],
-                    "expires_at": entry["expires_at"],
-                    "state": entry["state"],
-                    "usage_count": entry["usage_count"],
-                    "metadata": entry["metadata"]
-                }
-                for key_id, entry in self.keys.items()
-            ]
-
-    # -------------------------
-    # Cleanup Expired Keys
-    # -------------------------
-
-    def cleanup_expired_keys(self) -> int:
-        """
-        Remove expired keys from memory and disk.
-        """
-        with self.lock:
-            expired = []
-
-            for key_id, entry in self.keys.items():
-                if entry["state"] == "EXPIRED":
-                    expired.append(key_id)
-
-            for key_id in expired:
-                self.delete_key(key_id)
-
-            return len(expired)
-
-    # -------------------------
-    # Persistence Helpers
-    # -------------------------
 
     def _persist_key(self, key_id: str, entry: dict):
         key_file = self.storage_path / f"{key_id}.key"
@@ -204,119 +191,3 @@ class KeyManager:
         if key_file.exists():
             with open(key_file, "r") as f:
                 self.keys[key_id] = json.load(f)
-
-
-
-
-    def request_quantum_key(
-        self,
-        slave_sae_id: str,
-        key_length: int = 256
-    ) -> Tuple[str, bytes]:
-        """
-        Master SAE requests a fresh quantum key (ETSI enc_keys).
-        """
-
-        if not self.qkd_provider:
-            raise RuntimeError("No QKD provider configured")
-
-        key_id, key, meta = self.qkd_provider.request_key(
-            sender_id=self.manager_id,
-            receiver_id=slave_sae_id,
-            key_size_bits=key_length
-        )
-
-        self.store_key(
-            key,
-            key_id,
-            metadata={
-                "peer_sae": slave_sae_id,
-                "role": "master",
-                "key_length": key_length,
-                **meta,
-            },
-            expires_in=meta.get("expires_in")
-        )
-
-        return key_id, key
-    
-
-
-    def retrieve_quantum_key(
-        self,
-        master_sae_id: str,
-        key_id: str
-    ) -> bytes:
-        """
-        Slave SAE retrieves a key using key_ID (ETSI dec_keys).
-        """
-
-        if not self.qkd_provider:
-            raise RuntimeError("No QKD provider configured")
-
-        key, meta = self.qkd_provider.retrieve_key(
-            sender_id=master_sae_id,
-            key_id=key_id
-        )
-
-        self.store_key(
-            key,
-            key_id,
-            metadata={
-                "peer_sae": master_sae_id,
-                "role": "slave",
-                **meta,
-            },
-            expires_in=meta.get("expires_in")
-        )
-
-        return key
-
-
-# =========================
-# Key Exchange Protocol
-# =========================
-
-class KeyExchangeProtocol:
-    """
-    Handles quantum key exchange between two KMEs.
-    """
-
-    def __init__(self, qkd_provider):
-        if isinstance(qkd_provider, QuKayDeeProvider):
-            raise RuntimeError(
-                "KeyExchangeProtocol is not valid for ETSI QKD providers"
-            )
-        self.qkd_provider = qkd_provider
-
-    def request_key(
-        self,
-        sender_manager: KeyManager,
-        receiver_manager: KeyManager,
-        key_length: int = 256
-    ) -> Tuple[str, bytes]:
-        """
-        Request a new quantum key pair.
-        """
-
-        key_id, quantum_key = self.qkd_provider.request_key(
-            sender_manager.manager_id,
-            receiver_manager.manager_id,
-            key_length=key_length
-        )
-
-        # Local simulator ONLY (BB84 / demo)
-        sender_manager.store_key(
-            quantum_key,
-            key_id,
-            {
-                "peer": receiver_manager.manager_id,
-                "purpose": "simulated_exchange",
-                "key_length": key_length,
-                "role": "simulator_sender"
-            }
-        )
-
-        
-
-        return key_id, quantum_key

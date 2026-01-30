@@ -1,19 +1,39 @@
-# Virtual Environment
+# --- Python Standard ---
 .venv/
-# Google OAuth files - DO NOT COMMIT
-credentials.json
-token.json
-
-# Python cache
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 
-# Local key storage
+# --- IDE & OS Metadata ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- Google Authentication (SENSITIVE) ---
+credentials.json
+token.json
+token.pickle
+
+# --- Quantum Key Distribution (SENSITIVE) ---
+# Ignore the specific setup folder if it only contains keys
+src/qkd/Qukaydee_setup/
+
+# Key Store (Where downloaded keys are saved)
 key_store/
 
-# Credentials
-token.json
-credentials.json
-*.crt
+# --- Certificates & Keys (GLOBAL BLOCK) ---
+# Crucial: Never commit private keys
 *.key
 *.pem
+*.p12
+
+# Optional: Ignore certs if they are specific to your machine
+*.crt
+*.csr
+*.srl
+
+# --- Logs & Environment ---
+*.log
+.env
