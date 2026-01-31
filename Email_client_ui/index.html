@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SecureMail - Email Client</title>
+    <!-- Use relative paths for Electron -->
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <!-- Login Screen -->
+    <div id="loginScreen" class="screen active">
+        <div class="login-container">
+            <div class="login-card">
+                <div class="logo-section">
+                    <div class="logo-icon">
+                        <!-- Simple SVG content embedded directly -->
+                        <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+                            <path
+                                d="M3 8L10.89 13.26C11.5 13.67 12.5 13.67 13.11 13.26L21 8M5 19H19C20.1046 19 21 18.1046 21 17V7C21 5.89543 20.1046 5 19 5H5C3.89543 5 3 5.89543 3 7V17C3 18.1046 3.89543 19 5 19Z" />
+                        </svg>
+                    </div>
+                    <h1>SecureMail</h1>
+                </div>
+
+                <div class="login-content">
+                    <h2>Welcome Back</h2>
+                    <button class="google-signin-btn" id="googleSignInBtn">
+                        Sign in with Google
+                    </button>
+                    <div style="margin-top:20px; color: #10b981; font-size: 12px;">Secured with end-to-end encryption
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Email Client -->
+    <div id="emailClient" class="screen">
+        <div class="app-container">
+            <aside class="sidebar">
+                <div class="sidebar-header">
+                    <h2>SecureMail</h2>
+                </div>
+
+                <button class="compose-btn" id="composeBtn">Compose</button>
+
+                <nav class="sidebar-nav">
+                    <a href="#" class="nav-item active"><span>Inbox</span></a>
+                    <a href="#" class="nav-item"><span>Sent</span></a>
+                    <a href="#" class="nav-item"><span>Drafts</span></a>
+                    <a href="#" class="nav-item"><span>Starred</span></a>
+                    <a href="#" class="nav-item"><span>Important</span></a>
+                    <a href="#" class="nav-item"><span>Spam</span></a>
+                    <a href="#" class="nav-item"><span>Trash</span></a>
+                </nav>
+
+                <div class="user-profile" id="userProfileTrigger">
+                    <div class="user-avatar">U</div>
+                    <div class="user-info">
+                        <div class="user-name" id="userName">User</div>
+                    </div>
+                    <!-- Profile Popover -->
+                    <div class="profile-popover" id="profilePopover">
+                        <div class="popover-header">
+                            <div class="popover-avatar">U</div>
+                            <div class="popover-details">
+                                <span class="popover-name">User Name</span>
+                                <span class="popover-email">user@gmail.com</span>
+                            </div>
+                        </div>
+                        <div class="popover-menu">
+                            <button class="menu-item">Manage Account</button>
+                            <button class="menu-item logout" id="logoutBtn">Sign out</button>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <main class="email-list-container">
+                <div class="email-list-header">
+                    <span>Inbox</span>
+                    <div class="search-bar">
+                        <input type="text" id="searchInput" placeholder="Search mail">
+                    </div>
+                </div>
+                <div class="email-list" id="emailList"></div>
+            </main>
+
+            <section class="email-detail" id="emailDetail">
+                <div style="text-align:center; padding-top: 100px; color: var(--text-secondary);">Select an email to
+                    read</div>
+            </section>
+        </div>
+    </div>
+
+    <!-- Compose Modal -->
+    <div id="composeModal" class="modal">
+        <div class="modal-content compose-modal">
+            <div class="modal-header">
+                <h2>New Message</h2>
+                <button class="close-btn" id="closeComposeBtn">X</button>
+            </div>
+
+            <div class="compose-form">
+                <div class="form-group">
+                    <label>To</label>
+                    <input type="email" id="recipientEmail" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Subject</label>
+                    <input type="text" id="emailSubject" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Security Level</label>
+                    <div class="custom-select">
+                        <select id="securityLevel">
+                            <option value="standard">Standard</option>
+                            <option value="confidential">Confidential</option>
+                            <option value="top-secret">Top Secret</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group editor-group">
+                    <label>Message</label>
+                    <div class="editor-toolbar">
+                        <button type="button" class="toolbar-btn" data-command="bold">B</button>
+                        <button type="button" class="toolbar-btn" data-command="italic">I</button>
+                        <button type="button" class="toolbar-btn" data-command="underline">U</button>
+                    </div>
+                    <div class="editor" id="emailBody" contenteditable="true"></div>
+                </div>
+
+                <div class="compose-actions">
+                    <button class="btn-secondary" id="saveDraftBtn">Save Draft</button>
+                    <button class="btn-primary" id="sendEmailBtn">Send</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+
+</html>w

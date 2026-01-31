@@ -16,8 +16,6 @@ google-api-python-client>=2.100.0
 # HTTP Requests
 requests>=2.31.0
 
-# GUI (included in Python standard library, but listing for documentation)
-# tkinter - comes with Python
 
 # Optional: For better password hashing
 argon2-cffi>=23.1.0

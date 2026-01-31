@@ -5,6 +5,9 @@ __pycache__/
 *.pyo
 *.pyd
 
+# --- Virtual Environment ---
+SIH/
+
 # --- IDE & OS Metadata ---
 .vscode/
 .idea/
@@ -16,24 +19,23 @@ credentials.json
 token.json
 token.pickle
 
-# --- Quantum Key Distribution (SENSITIVE) ---
-# Ignore the specific setup folder if it only contains keys
-src/qkd/Qukaydee_setup/
-
-# Key Store (Where downloaded keys are saved)
+# --- Key Store ---
 key_store/
 
-# --- Certificates & Keys (GLOBAL BLOCK) ---
-# Crucial: Never commit private keys
-*.key
-*.pem
-*.p12
-
-# Optional: Ignore certs if they are specific to your machine
-*.crt
-*.csr
-*.srl
+# --- Dependencies ---
+node_modules/
+Email_client_ui/node_modules/
 
 # --- Logs & Environment ---
 *.log
 .env
+
+# --- QKD Setup Security Rules ---
+src/Qukaydee_setup/**/*.key
+src/Qukaydee_setup/**/*.pem
+src/Qukaydee_setup/**/*.crt
+src/Qukaydee_setup/**/*.csr
+src/Qukaydee_setup/**/*.srl
+
+# Exception for Server CA
+!src/Qukaydee_setup/certs/account-3000-server-ca-qukaydee-com.crt

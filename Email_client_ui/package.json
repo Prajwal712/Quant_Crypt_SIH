@@ -1,0 +1,14 @@
+{
+    "name": "secure-mail-desktop",
+    "version": "1.0.0",
+    "description": "A secure email client desktop application",
+    "main": "main.js",
+    "scripts": {
+        "start": "electron . --no-sandbox"
+    },
+    "author": "Antigravity",
+    "license": "ISC",
+    "devDependencies": {
+        "electron": "^28.1.0"
+    }
+}
