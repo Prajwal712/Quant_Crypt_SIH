@@ -1,5 +1,12 @@
 document.addEventListener('DOMContentLoaded', () => {
-    // State
+    // =============================
+    // CONFIG
+    // =============================
+    const API_BASE = "http://localhost:5000";
+
+    // =============================
+    // STATE
+    // =============================
     const state = {
         currentUser: null,
         emails: [],
@@ -7,67 +14,80 @@ document.addEventListener('DOMContentLoaded', () => {
         searchTerm: ''
     };
 
-    // DOM Elements
+    // =============================
+    // DOM ELEMENTS
+    // =============================
     const screens = {
         login: document.getElementById('loginScreen'),
         app: document.getElementById('emailClient')
     };
 
-    // Login
     const loginBtn = document.getElementById('googleSignInBtn');
 
-    // Profile
     const profileTrigger = document.getElementById('userProfileTrigger');
     const profilePopover = document.getElementById('profilePopover');
     const logoutBtn = document.getElementById('logoutBtn');
 
-    // App Navigation & Search
     const searchInput = document.getElementById('searchInput');
     const navItems = document.querySelectorAll('.nav-item');
     const listHeaderTitle = document.querySelector('.email-list-header span');
 
-    // Compose
     const composeBtn = document.getElementById('composeBtn');
     const composeModal = document.getElementById('composeModal');
     const closeComposeBtn = document.getElementById('closeComposeBtn');
     const sendBtn = document.getElementById('sendEmailBtn');
 
-    // List & Detail
     const emailList = document.getElementById('emailList');
     const emailDetail = document.getElementById('emailDetail');
     const editor = document.getElementById('emailBody');
     const toolbarBtns = document.querySelectorAll('.toolbar-btn');
 
-    // Data Generation
-    const generateMockEmails = () => {
-        const senders = ['Google Security', 'Netflix', 'Amazon', 'LinkedIn', 'Twitter', 'Slack', 'GitHub'];
-        const subjects = ['Security Alert', 'New Arrival', 'Your Order', 'New Connection', 'Login Alert', 'Mentioned in #general', 'Workflow success'];
-        const folders = ['inbox', 'inbox', 'inbox', 'starred', 'important', 'spam', 'trash'];
+    // =============================
+    // API HELPERS
+    // =============================
+    async function apiInit() {
+        const res = await fetch(`${API_BASE}/api/init`, { method: "POST" });
+        return res.json();
+    }
 
-        return Array.from({ length: 25 }, (_, i) => ({
-            id: i + 1,
-            sender: senders[Math.floor(Math.random() * senders.length)],
-            subject: subjects[Math.floor(Math.random() * subjects.length)],
-            body: `This is the body for email #${i + 1}. It contains confidential information.`,
-            time: new Date(Date.now() - Math.floor(Math.random() * 5000000000)).toLocaleDateString(),
-            read: Math.random() > 0.4,
-            folder: folders[Math.floor(Math.random() * folders.length)],
-            securityLevel: ['standard', 'confidential', 'top-secret'][Math.floor(Math.random() * 3)]
-        }));
-    };
+    async function apiListEmails() {
+        const res = await fetch(`${API_BASE}/api/list`);
+        return res.json();
+    }
 
-    // --- Event Listeners ---
+    async function apiSendEmail(payload) {
+        const res = await fetch(`${API_BASE}/api/send`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
+        return res.json();
+    }
 
-    // Login
-    loginBtn.addEventListener('click', () => {
+    // =============================
+    // LOGIN
+    // =============================
+    loginBtn.addEventListener('click', async () => {
+        const init = await apiInit();
+
+        if (init.status !== "success" && init.status !== "already_initialized") {
+            alert("Backend initialization failed");
+            return;
+        }
+
         screens.login.classList.remove('active');
         screens.app.classList.add('active');
-        state.emails = generateMockEmails();
-        state.currentUser = { name: 'User Name', email: 'user@gmail.com' };
+
+        state.currentUser = { name: "User", email: "me@gmail.com" };
+
+        const inbox = await apiListEmails();
+        state.emails = inbox.emails || [];
         renderEmailList();
     });
 
-    // Profile Popover
+    // =============================
+    // PROFILE POPOVER
+    // =============================
     profileTrigger.addEventListener('click', (e) => {
         e.stopPropagation();
         profilePopover.classList.toggle('active');
@@ -79,42 +99,42 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    logoutBtn.addEventListener('click', (e) => {
-        e.stopPropagation(); // prevent re-triggering popover
-        // Reset
+    logoutBtn.addEventListener('click', () => {
         state.currentUser = null;
         state.emails = [];
         profilePopover.classList.remove('active');
 
-        // Switch Screens
         screens.app.classList.remove('active');
         screens.login.classList.add('active');
     });
 
-    // Search
+    // =============================
+    // SEARCH
+    // =============================
     searchInput.addEventListener('input', (e) => {
         state.searchTerm = e.target.value.toLowerCase();
         renderEmailList();
     });
 
-    // Navigation
+    // =============================
+    // NAVIGATION
+    // =============================
     navItems.forEach(item => {
         item.addEventListener('click', (e) => {
             e.preventDefault();
             navItems.forEach(n => n.classList.remove('active'));
             item.classList.add('active');
 
-            const folderName = item.querySelector('span').textContent.toLowerCase();
-            state.currentFolder = folderName;
-
-            // Update Header
+            state.currentFolder = item.querySelector('span').textContent.toLowerCase();
             listHeaderTitle.textContent = item.querySelector('span').textContent;
 
             renderEmailList();
         });
     });
 
-    // Compose
+    // =============================
+    // COMPOSE
+    // =============================
     composeBtn.addEventListener('click', () => composeModal.classList.add('active'));
     closeComposeBtn.addEventListener('click', () => composeModal.classList.remove('active'));
 
@@ -125,49 +145,49 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    sendBtn.addEventListener('click', () => {
+    // =============================
+    // SEND EMAIL (REAL BACKEND)
+    // =============================
+    sendBtn.addEventListener('click', async () => {
         const recipient = document.getElementById('recipientEmail').value;
         const subject = document.getElementById('emailSubject').value;
-        const body = editor.innerHTML;
+        const body = editor.innerText;
         const security = document.getElementById('securityLevel').value;
 
-        if (!recipient || !subject) return alert('Please fill in required fields');
+        if (!recipient || !subject || !body) {
+            alert("Please fill all fields");
+            return;
+        }
 
-        const newEmail = {
-            id: Date.now(),
-            sender: 'Me',
-            subject: subject,
-            body: body,
-            time: 'Just now',
-            read: true,
-            folder: 'sent',
-            securityLevel: security
-        };
+        const result = await apiSendEmail({
+            recipient,
+            subject,
+            body,
+            security
+        });
 
-        state.emails.unshift(newEmail);
-        composeModal.classList.remove('active');
+        if (result.status === "success") {
+            alert("🔐 Quantum-Encrypted Email Sent");
+            composeModal.classList.remove('active');
 
-        // Clear form
-        document.getElementById('recipientEmail').value = '';
-        document.getElementById('emailSubject').value = '';
-        editor.innerHTML = '';
-
-        if (state.currentFolder === 'sent') renderEmailList();
-        // Optional: show toast
-        console.log("Email sent!");
+            editor.innerHTML = '';
+            document.getElementById('recipientEmail').value = '';
+            document.getElementById('emailSubject').value = '';
+        } else {
+            alert("❌ Send failed: " + result.error);
+        }
     });
 
-    // --- Render Logic ---
-
+    // =============================
+    // RENDER EMAIL LIST
+    // =============================
     function renderEmailList() {
         emailList.innerHTML = '';
 
         const filtered = state.emails.filter(email => {
-            // Folder Filter
-            const folderMatch = email.folder === state.currentFolder;
-
-            // Search Filter
-            const searchMatch = !state.searchTerm ||
+            const folderMatch = email.folder === state.currentFolder || state.currentFolder === "inbox";
+            const searchMatch =
+                !state.searchTerm ||
                 email.subject.toLowerCase().includes(state.searchTerm) ||
                 email.sender.toLowerCase().includes(state.searchTerm);
 
@@ -175,7 +195,10 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         if (filtered.length === 0) {
-            emailList.innerHTML = `<div style="padding:20px; text-align:center; color:var(--text-secondary)">No emails found</div>`;
+            emailList.innerHTML =
+                `<div style="padding:20px;text-align:center;color:var(--text-secondary)">
+                    No emails found
+                 </div>`;
             return;
         }
 
@@ -188,35 +211,29 @@ document.addEventListener('DOMContentLoaded', () => {
                     <span class="email-time">${email.time}</span>
                 </div>
                 <div class="email-subject">${email.subject}</div>
-                <div class="email-preview">${email.body.replace(/<[^>]*>/g, '')}</div>
             `;
             el.addEventListener('click', () => openEmail(email));
             emailList.appendChild(el);
         });
     }
 
+    // =============================
+    // OPEN EMAIL
+    // =============================
     function openEmail(email) {
         email.read = true;
         renderEmailList();
-
-        const badgeText = email.securityLevel === 'top-secret' ? 'Top Secret' :
-            email.securityLevel === 'confidential' ? 'Confidential' : 'Standard';
 
         emailDetail.innerHTML = `
             <div class="detail-header">
                 <div class="detail-subject">${email.subject}</div>
                 <div class="detail-meta">
                     <span>From: <strong>${email.sender}</strong></span>
-                    <span>${email.time}</span>
-                </div>
-                <div class="detail-security" style="
-                    color: ${email.securityLevel === 'top-secret' ? '#ef4444' : '#667eea'};
-                    background: ${email.securityLevel === 'top-secret' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(102, 126, 234, 0.1)'}
-                ">
-                    Security: ${badgeText}
                 </div>
             </div>
-            <div class="detail-body">${email.body}</div>
+            <div class="detail-body">
+                <em>Encrypted message – decrypt via backend</em>
+            </div>
         `;
     }
 });
