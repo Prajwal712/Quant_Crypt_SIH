@@ -91,7 +91,22 @@ document.addEventListener('DOMContentLoaded', () => {
         screens.login.classList.remove('active');
         screens.app.classList.add('active');
 
-        state.currentUser = { name: "User", email: "me@gmail.com" };
+        const email = "me@gmail.com"; // later from Gmail API
+        const name = email.split("@")[0];
+
+        state.currentUser = {
+            name: name.charAt(0).toUpperCase() + name.slice(1),
+            email
+        };
+        // ✅ Update profile UI AFTER login
+        document.getElementById("userName").innerText = state.currentUser.name;
+        document.querySelector(".popover-name").innerText = state.currentUser.name;
+        document.querySelector(".popover-email").innerText = state.currentUser.email;
+
+        document.querySelector(".user-avatar").innerText =
+            state.currentUser.name[0].toUpperCase();
+        document.querySelector(".popover-avatar").innerText =
+            state.currentUser.name[0].toUpperCase();
 
         await refreshInbox();
     });
@@ -110,7 +125,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    logoutBtn.addEventListener('click', () => {
+    logoutBtn.addEventListener('click', async () => {
+        await fetch(`${API_BASE}/api/logout`, { method: "POST" });
+
         state.currentUser = null;
         state.emails = [];
         profilePopover.classList.remove('active');
@@ -189,7 +206,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 time: "Just now",
                 read: true,
                 folder: "sent",
-                security
+                security_level: Number(result.security_level ?? security)
             };
 
             state.emails.unshift(sentMail);
@@ -221,10 +238,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 state.currentFolder === "inbox"
                     ? email.folder === "inbox"
                     : email.folder === state.currentFolder;
+            const subjectText = (email.subject || "").toLowerCase();
+            const senderText = (email.sender || "").toLowerCase();
+
             const searchMatch =
                 !state.searchTerm ||
-                email.subject.toLowerCase().includes(state.searchTerm) ||
-                email.sender.toLowerCase().includes(state.searchTerm);
+                subjectText.includes(state.searchTerm) ||
+                senderText.includes(state.searchTerm);
 
             return folderMatch && searchMatch;
         });
@@ -239,13 +259,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
         filtered.forEach(email => {
             const el = document.createElement('div');
-            el.className = `email-item ${!email.read ? 'unread' : ''}`;
+            el.className = `email-item ${email.read ? 'read' : 'unread'}`;
+            const subject =
+                email.subject && email.subject.trim()
+                    ? email.subject
+                    : "(No subject)";
+
             el.innerHTML = `
                 <div class="email-sender">
                     <span>${email.sender}</span>
                     <span class="email-time">${email.time}</span>
                 </div>
-                <div class="email-subject">${email.subject}</div>
+                <div class="email-subject">${subject}</div>
             `;
             el.addEventListener('click', () => openEmail(email));
             emailList.appendChild(el);
@@ -266,7 +291,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     ...e,
                     folder: "inbox",
                     read: false,
-                    decrypted: false
+                    decrypted: false,
+                    security_level: Number(e.security_level)
                 });
             });
 
@@ -279,7 +305,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // =============================
    async function openEmail(email) {
 
-    if (email.decrypted) {
+    if (email.decrypted && email.security_level === 1) {
         emailDetail.innerHTML = `
             <div style="padding:40px; color: var(--danger)">
                 🔒 This message was already decrypted once.<br/>
@@ -325,6 +351,7 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
 
             email.decrypted = true;   
+            email.security_level = Number(data.security_level);
             email.read = true;
     } catch (err) {
         emailDetail.innerHTML = `

@@ -31,6 +31,7 @@ class KeyManager:
         self.qkd_provider = qkd_provider
         self.keys: Dict[str, dict] = {}
         self.lock = Lock()
+        self._cached_key = None
 
         # Persistent storage setup
         if storage_path:
@@ -39,6 +40,15 @@ class KeyManager:
             self.storage_path = Path(f"./key_store/{manager_id}")
 
         self.storage_path.mkdir(parents=True, exist_ok=True)
+
+    def get_cached_key(self, length: int = 32):
+        """
+        Returns a reusable symmetric key (AES).
+        Used for Standard & Confidential modes.
+        """
+        if self._cached_key is None:
+            self._cached_key = secrets.token_bytes(length)
+        return self._cached_key
 
     # -------------------------
     # QKD Integration Methods

@@ -329,6 +329,11 @@ body {
     background: rgba(102, 126, 234, 0.05);
 }
 
+.email-item.read {
+    opacity: 0.55;
+    background: transparent;
+}
+
 .email-sender {
     font-weight: 600;
     margin-bottom: 4px;
@@ -515,4 +520,20 @@ body {
     border-radius: 6px;
     color: var(--text-secondary);
     cursor: pointer;
+}
+
+.app-container {
+    height: 100vh;
+}
+
+.email-list-container {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;   /* 🔥 REQUIRED */
+}
+
+.email-list {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;   /* 🔥 REQUIRED */
 }

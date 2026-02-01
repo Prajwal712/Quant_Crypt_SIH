@@ -150,7 +150,7 @@ def list_messages():
     try:
         results = engine.gmail_service.users().messages().list(
             userId='me',
-            q='subject:"[QUANTUM-ENCRYPTED]"',
+            q='[QUANTUM-ENCRYPTED]',
             maxResults=10
         ).execute()
 
@@ -164,14 +164,23 @@ def list_messages():
             ).execute()
 
             headers = msg['payload'].get('headers', [])
-            subject = next(
-                (h['value'] for h in headers if h['name'] == 'Subject'),
-                "No Subject"
+            raw_subject = next(
+                (h['value'] for h in headers if h['name'].lower() == 'subject'),
+                None
             )
+
+            if raw_subject:
+                subject = raw_subject.replace("[QUANTUM-ENCRYPTED]", "").strip()
+            else:
+                subject = "(No subject)"
             sender = next(
                 (h['value'] for h in headers if h['name'] == 'From'),
                 "Unknown"
             )
+            security_level = int(next(
+                (h['value'] for h in headers if h['name'] == 'X-Quantum-Security'),
+                "2"  # default AES-GCM
+            ))
 
             emails.append({
                 "id": m['id'],
@@ -179,7 +188,8 @@ def list_messages():
                 "subject": subject,
                 "time": "Just now",
                 "read": False,
-                "folder": "inbox"
+                "folder": "inbox",
+                "security_level": security_level
             })
 
         return jsonify({
@@ -276,6 +286,16 @@ def decrypt_mail():
             "status": "error",
             "error": "Decryption failed"
         }), 500
+    
+@app.route("/api/logout", methods=["POST"])
+def logout():
+    try:
+        token_path = "./token.json"
+        if os.path.exists(token_path):
+            os.remove(token_path)
+        return jsonify({"status": "success"})
+    except Exception:
+        return jsonify({"status": "error"}), 500
 
 
 # --------------------------------------------------
