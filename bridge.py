@@ -5,7 +5,9 @@ import traceback
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
-# Ensure internal module pathing works from root
+# --------------------------------------------------
+# Path setup
+# --------------------------------------------------
 sys.path.append(os.getcwd())
 
 from src.email_engine.auth import get_gmail_service
@@ -14,36 +16,79 @@ from src.key_management.key_manager import KeyManager
 from src.cryptography.security_levels import EncryptionEngine, SecurityLevel
 from src.qkd.qukaydee_provider import QuKayDeeProvider
 
-# Setup Logging
+# --------------------------------------------------
+# App + Logging
+# --------------------------------------------------
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("MailQ-Bridge")
 
 app = Flask(__name__)
 CORS(app)
 
-# Global instances
+# --------------------------------------------------
+# Global state
+# --------------------------------------------------
 engine = None
 my_km = None
 peer_km = None
+initialized = False
+
 ROLE = sys.argv[1] if len(sys.argv) > 1 else "alice"
 
+# --------------------------------------------------
+# Helpers
+# --------------------------------------------------
+def require_initialized():
+    return jsonify({
+        "status": "error",
+        "error": "Backend not initialized. Call /api/init first."
+    }), 400
+
+
+# --------------------------------------------------
+# INIT
+# --------------------------------------------------
 @app.route('/api/init', methods=['POST'])
 def initialize():
-    global engine, my_km, peer_km
+    global engine, my_km, peer_km, initialized
+
+    if initialized:
+        return jsonify({
+            "status": "already_initialized",
+            "role": ROLE
+        })
+
     try:
-        log.info(f"Initializing mTLS tunnel for role: {ROLE}")
-        service = get_gmail_service()
-        
-        # Resolve paths for QuKayDee setup
+        log.info(f"🔐 Initializing mTLS + QKD engine for role: {ROLE}")
+
+        # --------------------------------------------------
+        # Gmail OAuth → ONLY Alice
+        # --------------------------------------------------
+        # gmail_service = None
+        # if ROLE == "alice":
+        #     gmail_service = get_gmail_service()
+
+        gmail_service = get_gmail_service()
+
+        # --------------------------------------------------
+        # QKD paths
+        # --------------------------------------------------
         base_setup = os.path.join(os.getcwd(), "src", "Qukaydee_setup")
-        ca_path = os.path.join(base_setup, "certs", "account-3000-server-ca-qukaydee-com.crt")
-        
-        # Configure Provider based on ROLE
+        ca_path = os.path.join(
+            base_setup,
+            "certs",
+            "account-3000-server-ca-qukaydee-com.crt"
+        )
+
         my_id = "sae-1" if ROLE == "alice" else "sae-2"
         peer_id = "sae-2" if ROLE == "alice" else "sae-1"
         role_dir = "alice_sender" if ROLE == "alice" else "bob_receiver"
-        
-        kme_url = f"https://kme-{'1' if ROLE == 'alice' else '2'}.acct-3000.etsi-qkd-api.qukaydee.com"
+
+        kme_url = (
+            "https://kme-1.acct-3000.etsi-qkd-api.qukaydee.com"
+            if ROLE == "alice"
+            else "https://kme-2.acct-3000.etsi-qkd-api.qukaydee.com"
+        )
 
         provider = QuKayDeeProvider(
             host=kme_url,
@@ -52,49 +97,190 @@ def initialize():
             ca_path=ca_path
         )
 
-        my_km = KeyManager(my_id, qkd_provider=provider, storage_path=f"./key_store/{ROLE}")
-        peer_km = KeyManager(peer_id, storage_path=f"./key_store/{ROLE}_stub")
-        engine = QuantumEmailEngine(service, my_km, EncryptionEngine())
-        
-        return jsonify({"status": "success", "role": ROLE})
-    except Exception as e:
-        log.error(f"Initialization Failed: {traceback.format_exc()}")
-        return jsonify({"status": "error", "error": str(e)}), 500
+        my_km = KeyManager(
+            my_id,
+            qkd_provider=provider,
+            storage_path=f"./key_store/{ROLE}"
+        )
 
+        # Peer KM stub (no QKD provider on purpose)
+        peer_km = KeyManager(
+            peer_id,
+            storage_path=f"./key_store/{ROLE}_stub"
+        )
+
+        engine = QuantumEmailEngine(
+            gmail_service,
+            my_km,
+            EncryptionEngine()
+        )
+
+        initialized = True
+        log.info("✅ Backend initialization complete")
+
+        return jsonify({
+            "status": "success",
+            "role": ROLE
+        })
+
+    except Exception:
+        log.error("❌ Initialization failed")
+        log.error(traceback.format_exc())
+        return jsonify({
+            "status": "error",
+            "error": "Initialization failed. Check server logs."
+        }), 500
+
+
+# --------------------------------------------------
+# LIST EMAILS
+# --------------------------------------------------
 @app.route('/api/list', methods=['GET'])
 def list_messages():
-    """Fetch unread emails for the UI"""
-    try:
-        results = engine.gmail_service.users().messages().list(userId='me', q="is:unread", maxResults=5).execute()
-        messages = results.get('messages', [])
-        
-        emails = []
-        for m in messages:
-            msg = engine.gmail_service.users().messages().get(userId='me', id=m['id']).execute()
-            headers = msg['payload'].get('headers', [])
-            subject = next((h['value'] for h in headers if h['name'] == 'Subject'), "No Subject")
-            sender = next((h['value'] for h in headers if h['name'] == 'From'), "Unknown")
-            emails.append({"id": m['id'], "sender": sender, "subject": subject, "time": "Just now", "read": False, "folder": "inbox"})
-        return jsonify({"status": "success", "emails": emails})
-    except Exception as e:
-        return jsonify({"status": "error", "error": str(e)}), 500
+    if not initialized:
+        return require_initialized()
 
+    # Bob NEVER touches Gmail
+    # if ROLE == "bob":
+    #     return jsonify({
+    #         "status": "success",
+    #         "emails": []
+    #     })
+
+    try:
+        results = engine.gmail_service.users().messages().list(
+            userId='me',
+            q='subject:"[QUANTUM-ENCRYPTED]"',
+            maxResults=10
+        ).execute()
+
+        messages = results.get('messages', [])
+        emails = []
+
+        for m in messages:
+            msg = engine.gmail_service.users().messages().get(
+                userId='me',
+                id=m['id']
+            ).execute()
+
+            headers = msg['payload'].get('headers', [])
+            subject = next(
+                (h['value'] for h in headers if h['name'] == 'Subject'),
+                "No Subject"
+            )
+            sender = next(
+                (h['value'] for h in headers if h['name'] == 'From'),
+                "Unknown"
+            )
+
+            emails.append({
+                "id": m['id'],
+                "sender": sender,
+                "subject": subject,
+                "time": "Just now",
+                "read": False,
+                "folder": "inbox"
+            })
+
+        return jsonify({
+            "status": "success",
+            "emails": emails
+        })
+
+    except Exception:
+        log.error(traceback.format_exc())
+        return jsonify({
+            "status": "error",
+            "error": "Failed to list emails"
+        }), 500
+
+
+# --------------------------------------------------
+# SEND EMAIL (Alice only)
+# --------------------------------------------------
 @app.route('/api/send', methods=['POST'])
 def send_mail():
-    data = request.json
-    sec_map = {"standard": SecurityLevel.LEVEL_2_STANDARD, "confidential": SecurityLevel.LEVEL_3_HIGH, "top-secret": SecurityLevel.LEVEL_1_BASIC}
-    result = engine.send_encrypted_email(
-        sender="me", recipient=data['recipient'], subject=data['subject'],
-        plaintext_content=data['body'], security_level=sec_map[data['security']],
-        recipient_key_manager=peer_km
-    )
-    return jsonify(result)
+    if not initialized:
+        return require_initialized()
 
+    if ROLE != "alice":
+        return jsonify({
+            "status": "error",
+            "error": "Only Alice can send emails"
+        }), 403
+
+    data = request.json
+    if not data or not all(k in data for k in ("recipient", "subject", "body", "security")):
+        return jsonify({
+            "status": "error",
+            "error": "Invalid request payload"
+        }), 400
+
+    sec_map = {
+        "standard": SecurityLevel.LEVEL_2_STANDARD,
+        "confidential": SecurityLevel.LEVEL_3_HIGH,
+        "top-secret": SecurityLevel.LEVEL_1_BASIC
+    }
+
+    try:
+        result = engine.send_encrypted_email(
+            sender="me",
+            recipient=data['recipient'],
+            subject=data['subject'],
+            plaintext_content=data['body'],
+            security_level=sec_map[data['security']],
+            recipient_key_manager=peer_km
+        )
+
+        return jsonify(result)
+
+    except Exception:
+        log.error(traceback.format_exc())
+        return jsonify({
+            "status": "error",
+            "error": "Failed to send email"
+        }), 500
+
+
+# --------------------------------------------------
+# DECRYPT EMAIL (Bob only)
+# --------------------------------------------------
 @app.route('/api/decrypt', methods=['POST'])
 def decrypt_mail():
-    data = request.json
-    result = engine.receive_encrypted_email(message_id=data['messageId'], receiver_key_manager=my_km)
-    return jsonify(result)
+    if not initialized:
+        return require_initialized()
 
+    if ROLE != "bob":
+        return jsonify({
+            "status": "error",
+            "error": "Only Bob can decrypt emails"
+        }), 403
+
+    data = request.json
+    if not data or "messageId" not in data:
+        return jsonify({
+            "status": "error",
+            "error": "Missing messageId"
+        }), 400
+
+    try:
+        result = engine.receive_encrypted_email(
+            message_id=data['messageId'],
+            receiver_key_manager=my_km
+        )
+        return jsonify(result)
+
+    except Exception:
+        log.error(traceback.format_exc())
+        return jsonify({
+            "status": "error",
+            "error": "Decryption failed"
+        }), 500
+
+
+# --------------------------------------------------
+# RUN
+# --------------------------------------------------
 if __name__ == '__main__':
-    app.run(port=5000)
+    port = 5000 if ROLE == "alice" else 5001
+    app.run(port=port)

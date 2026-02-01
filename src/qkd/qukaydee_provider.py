@@ -78,7 +78,7 @@ class QuKayDeeProvider:
         url = f"{self.host}/api/v1/keys/{sender_id}/dec_keys"
         
         # Try lowercase 'key_id' first (standard compliant)
-        params = {"key_id": key_id}
+        params = {"key_ID": key_id}
 
         try:
             print(f"📡 [QuKayDee] Fetching dec_key {key_id} from {sender_id}...")

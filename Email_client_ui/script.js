@@ -2,7 +2,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // =============================
     // CONFIG
     // =============================
-    const API_BASE = "http://localhost:5000";
+ 
+
+    const API_BASE = window.location.search.includes("bob")
+  ? "http://localhost:5001"
+  : "http://localhost:5000";
 
     // =============================
     // STATE
@@ -64,6 +68,15 @@ document.addEventListener('DOMContentLoaded', () => {
         return res.json();
     }
 
+    async function apiDecrypt(messageId) {
+        const res = await fetch(`${API_BASE}/api/decrypt`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ messageId })
+        });
+        return res.json();
+    }
+
     // =============================
     // LOGIN
     // =============================
@@ -80,9 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         state.currentUser = { name: "User", email: "me@gmail.com" };
 
-        const inbox = await apiListEmails();
-        state.emails = inbox.emails || [];
-        renderEmailList();
+        await refreshInbox();
     });
 
     // =============================
@@ -128,7 +139,11 @@ document.addEventListener('DOMContentLoaded', () => {
             state.currentFolder = item.querySelector('span').textContent.toLowerCase();
             listHeaderTitle.textContent = item.querySelector('span').textContent;
 
-            renderEmailList();
+            if (state.currentFolder === "inbox") {
+                refreshInbox();
+            } else {
+                renderEmailList();
+            }
         });
     });
 
@@ -167,12 +182,29 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         if (result.status === "success") {
-            alert("🔐 Quantum-Encrypted Email Sent");
-            composeModal.classList.remove('active');
+            const sentMail = {
+                id: result.message_id,
+                sender: "Me",
+                subject,
+                time: "Just now",
+                read: true,
+                folder: "sent",
+                security
+            };
 
+            state.emails.unshift(sentMail);
+
+            composeModal.classList.remove('active');
             editor.innerHTML = '';
             document.getElementById('recipientEmail').value = '';
             document.getElementById('emailSubject').value = '';
+
+            // 🔥 Force UI refresh if user is in Sent
+            if (state.currentFolder === "sent") {
+                renderEmailList();
+            }
+
+            alert("🔐 Quantum-Encrypted Email Sent");
         } else {
             alert("❌ Send failed: " + result.error);
         }
@@ -185,7 +217,10 @@ document.addEventListener('DOMContentLoaded', () => {
         emailList.innerHTML = '';
 
         const filtered = state.emails.filter(email => {
-            const folderMatch = email.folder === state.currentFolder || state.currentFolder === "inbox";
+            const folderMatch =
+                state.currentFolder === "inbox"
+                    ? email.folder === "inbox"
+                    : email.folder === state.currentFolder;
             const searchMatch =
                 !state.searchTerm ||
                 email.subject.toLowerCase().includes(state.searchTerm) ||
@@ -217,23 +252,87 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+   
+    
+    async function refreshInbox() {
+        const res = await apiListEmails();
+        if (res.status === "success") {
+            // Remove old inbox mails
+            state.emails = state.emails.filter(m => m.folder !== "inbox");
+
+            // Add fresh inbox mails
+            res.emails.forEach(e => {
+                state.emails.push({
+                    ...e,
+                    folder: "inbox",
+                    read: false,
+                    decrypted: false
+                });
+            });
+
+            renderEmailList();
+        }
+    }
+
     // =============================
-    // OPEN EMAIL
+    // OPEN & DECRYPT EMAIL (FINAL)
     // =============================
-    function openEmail(email) {
-        email.read = true;
-        renderEmailList();
+   async function openEmail(email) {
+
+    if (email.decrypted) {
+        emailDetail.innerHTML = `
+            <div style="padding:40px; color: var(--danger)">
+                🔒 This message was already decrypted once.<br/>
+                OTP keys cannot be reused.
+            </div>
+        `;
+        return;
+    }
+    emailDetail.innerHTML = `
+        <div style="padding:40px; color: var(--text-secondary)">
+            🔐 Decrypting message…
+        </div>
+    `;
+
+    try {
+        const res = await fetch(`${API_BASE}/api/decrypt`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                messageId: email.id
+            })
+        });
+
+        const data = await res.json();
+
+        if (data.status !== "success") {
+            throw new Error(data.error || "Decryption failed");
+        }
 
         emailDetail.innerHTML = `
             <div class="detail-header">
-                <div class="detail-subject">${email.subject}</div>
+                <div class="detail-subject">${data.subject || "Decrypted Mail"}</div>
                 <div class="detail-meta">
-                    <span>From: <strong>${email.sender}</strong></span>
+                    From: <strong>${data.sender}</strong>
+                </div>
+                <div class="detail-security">
+                    🔑 QKD Key: ${data.key_id}
                 </div>
             </div>
-            <div class="detail-body">
-                <em>Encrypted message – decrypt via backend</em>
+            <div class="detail-body" style="white-space: pre-wrap">
+                ${data.content}
+            </div>
+        `;
+
+            email.decrypted = true;   
+            email.read = true;
+    } catch (err) {
+        emailDetail.innerHTML = `
+            <div style="padding:40px; color: var(--danger)">
+                ❌ Decryption failed<br/>
+                ${err.message}
             </div>
         `;
     }
+}
 });
