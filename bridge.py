@@ -226,11 +226,6 @@ def send_mail():
             "error": "Invalid request payload"
         }), 400
 
-    sec_map = {
-        "standard": SecurityLevel.LEVEL_2_STANDARD,
-        "confidential": SecurityLevel.LEVEL_3_HIGH,
-        "top-secret": SecurityLevel.LEVEL_1_BASIC
-    }
 
     try:
         result = engine.send_encrypted_email(
@@ -238,7 +233,7 @@ def send_mail():
             recipient=data['recipient'],
             subject=data['subject'],
             plaintext_content=data['body'],
-            security_level=sec_map[data['security']],
+            security_level = SecurityLevel(int(data["security"])),
             recipient_key_manager=peer_km
         )
 

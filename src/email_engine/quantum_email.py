@@ -71,6 +71,10 @@ class QuantumEmailEngine:
                 recipient_public_key,
             )
 
+            from ..key_management.key_manager import KEY_USAGE_POLICY
+
+            crypto_metadata["max_usage"] = KEY_USAGE_POLICY[security_level.value]["max_usage"]
+
             # 3️⃣ Build encrypted package
             encrypted_package = {
                 "ciphertext": base64.b64encode(ciphertext).decode("utf-8"),
@@ -190,7 +194,10 @@ class QuantumEmailEngine:
                     subject = h.get("value", subject)
                 elif h.get("name") == "From":
                     sender = h.get("value", sender)
-
+            print(
+                f"[AUDIT] Decrypted | level={metadata.get('security_level')} "
+                f"| key_id={key_id} | sender={sender_id}"
+            )
             return {
                 "status": "success",
                 "sender": sender,

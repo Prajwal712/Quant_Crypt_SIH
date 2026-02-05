@@ -119,9 +119,10 @@
                     <label>Security Level</label>
                     <div class="custom-select">
                         <select id="securityLevel">
-                            <option value="standard">Standard</option>
-                            <option value="confidential">Confidential</option>
-                            <option value="top-secret">Top Secret</option>
+                            <option value="1">Basic (OTP)</option>
+                            <option value="2" selected>Standard (AES-256-GCM)</option>
+                            <option value="3">High (ChaCha20-Poly1305)</option>
+                            <option value="4">Maximum (Hybrid)</option>
                         </select>
                     </div>
                 </div>

@@ -313,8 +313,12 @@ class EncryptionEngine:
         mixed = bytes(x ^ y for x, y in zip(a, b))
         return hashlib.sha256(mixed).digest()
 
+    # def _zeroize(self, data: bytes):
+    #     _ = b"\x00" * len(data)
+
     def _zeroize(self, data: bytes):
-        _ = b"\x00" * len(data)
+    # Best-effort zeroization (Python limitation)
+        pass
 
 
 # =========================

@@ -15,6 +15,13 @@ from threading import Lock
 from src.qkd.qukaydee_provider import QuKayDeeProvider
 
 
+KEY_USAGE_POLICY = {
+    1: {"max_usage": 1},     # LEVEL_1_BASIC (OTP)
+    2: {"max_usage": None},  # LEVEL_2_STANDARD (reusable)
+    3: {"max_usage": 10},    # LEVEL_3_HIGH
+    4: {"max_usage": 1},     # LEVEL_4_MAXIMUM
+}
+
 class KeyManager:
     """
     Manages quantum keys with lifecycle:
@@ -144,7 +151,8 @@ class KeyManager:
                 "expires_at": expires_at.isoformat(),
                 "usage_count": 0,
                 "state": "ACTIVE",
-                "metadata": metadata or {}
+                "metadata": metadata or {},
+                "max_usage": metadata.get("max_usage") if metadata else None,
             }
 
             self.keys[key_id] = entry
@@ -170,7 +178,12 @@ class KeyManager:
                 return None
 
             entry["usage_count"] += 1
-            entry["state"] = "CONSUMED"
+            max_usage = entry.get("max_usage")
+
+            if max_usage is not None and entry["usage_count"] >= max_usage:
+                entry["state"] = "CONSUMED"
+            else:
+                entry["state"] = "ACTIVE"
             self._persist_key(key_id, entry)
 
             return {
