@@ -4,9 +4,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // =============================
  
 
-    const API_BASE = window.location.search.includes("bob")
-  ? "http://localhost:5001"
-  : "http://localhost:5000";
+    // Default: sae-1 on port 5000
+    // For demo: open index.html?sae-2 in a second browser → port 5001
+    const API_BASE = window.location.search.includes("sae-2")
+        ? "http://localhost:5001"
+        : "http://localhost:5000";
 
     // =============================
     // STATE
@@ -45,6 +47,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const emailDetail = document.getElementById('emailDetail');
     const editor = document.getElementById('emailBody');
     const toolbarBtns = document.querySelectorAll('.toolbar-btn');
+    const refreshBtn = document.getElementById('refreshBtn');
+
+    // =============================
+    // REFRESH BUTTON
+    // =============================
+    refreshBtn.addEventListener('click', async () => {
+        refreshBtn.classList.add('spinning');
+        await refreshInbox();
+        refreshBtn.classList.remove('spinning');
+    });
 
     // =============================
     // API HELPERS
@@ -305,15 +317,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // =============================
    async function openEmail(email) {
 
-    if (email.decrypted && email.security_level === 1) {
-        emailDetail.innerHTML = `
-            <div style="padding:40px; color: var(--danger)">
-                🔒 This message was already decrypted once.<br/>
-                OTP keys cannot be reused.
-            </div>
-        `;
+    // If already decrypted, show cached content immediately
+    if (email.decrypted && email._cachedContent) {
+        emailDetail.innerHTML = email._cachedContent;
         return;
     }
+
     emailDetail.innerHTML = `
         <div style="padding:40px; color: var(--text-secondary)">
             🔐 Decrypting message…
@@ -335,7 +344,7 @@ document.addEventListener('DOMContentLoaded', () => {
             throw new Error(data.error || "Decryption failed");
         }
 
-        emailDetail.innerHTML = `
+        const detailHTML = `
             <div class="detail-header">
                 <div class="detail-subject">${data.subject || "Decrypted Mail"}</div>
                 <div class="detail-meta">
@@ -350,9 +359,14 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
         `;
 
-            email.decrypted = true;   
-            email.security_level = Number(data.security_level);
-            email.read = true;
+        emailDetail.innerHTML = detailHTML;
+
+        // Cache the decrypted content so it can be re-viewed
+        email._cachedContent = detailHTML;
+        email.decrypted = true;
+        email.security_level = Number(data.security_level);
+        email.read = true;
+
     } catch (err) {
         emailDetail.innerHTML = `
             <div style="padding:40px; color: var(--danger)">

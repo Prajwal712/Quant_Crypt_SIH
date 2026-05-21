@@ -1,6 +1,7 @@
 """
 Quantum Email GUI
 User interface for sending and receiving quantum-encrypted emails
+Single-user mode: one KeyManager (sae-1) handles both send and decrypt
 """
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
@@ -16,7 +17,7 @@ from ..email_engine.auth import get_gmail_service
 
 class QuantumEmailGUI:
     """
-    Main GUI application for quantum-encrypted email
+    Main GUI application for quantum-encrypted email (single-user mode)
     """
 
     def __init__(self):
@@ -26,8 +27,7 @@ class QuantumEmailGUI:
 
         # Initialize components
         self.gmail_service = None
-        self.sender_key_manager = None
-        self.receiver_key_manager = None
+        self.key_manager = None          # single KeyManager for both send & decrypt
         self.qkd_channel = None
         self.encryption_engine = None
         self.quantum_email_engine = None
@@ -79,16 +79,16 @@ class QuantumEmailGUI:
                                      font=('Arial', 10))
         self.status_label.pack(pady=5)
 
-        # Manager IDs
-        ttk.Label(frame, text="Sender Manager ID:").pack(pady=5)
-        self.sender_id_entry = ttk.Entry(frame, width=30)
-        self.sender_id_entry.insert(0, "sender_manager_1")
-        self.sender_id_entry.pack(pady=5)
+        # Single user identity
+        ttk.Label(frame, text="Your SAE Identity:").pack(pady=5)
+        self.user_id_entry = ttk.Entry(frame, width=30)
+        self.user_id_entry.insert(0, "sae-1")
+        self.user_id_entry.pack(pady=5)
 
-        ttk.Label(frame, text="Receiver Manager ID:").pack(pady=5)
-        self.receiver_id_entry = ttk.Entry(frame, width=30)
-        self.receiver_id_entry.insert(0, "receiver_manager_1")
-        self.receiver_id_entry.pack(pady=5)
+        ttk.Label(frame, text="Peer SAE Identity:").pack(pady=5)
+        self.peer_id_entry = ttk.Entry(frame, width=30)
+        self.peer_id_entry.insert(0, "sae-2")
+        self.peer_id_entry.pack(pady=5)
 
         # Initialize button
         self.init_button = ttk.Button(frame, text="Initialize System",
@@ -103,6 +103,9 @@ class QuantumEmailGUI:
         Level 2: Standard (AES-256-GCM) - Balanced
         Level 3: High (ChaCha20-Poly1305) - Enhanced Security
         Level 4: Maximum (Hybrid RSA+AES+Quantum) - Maximum Security
+
+        Single-user mode: Send encrypted emails AND decrypt received emails
+        using the same account and SAE identity.
 
         Click 'Initialize System' to start.
         """
@@ -233,25 +236,22 @@ class QuantumEmailGUI:
 
     def _initialize_system(self):
         """
-        Initialize the quantum email system
+        Initialize the quantum email system (single-user mode)
         """
         try:
             self.status_label.config(text="Status: Initializing...")
             self.init_button.config(state='disabled')
 
-            # Get manager IDs
-            sender_id = self.sender_id_entry.get()
-            receiver_id = self.receiver_id_entry.get()
+            # Get identities
+            user_id = self.user_id_entry.get()
+            peer_id = self.peer_id_entry.get()
 
             # Initialize Gmail service
             self.gmail_service = get_gmail_service()
 
-            # Initialize key managers
-            self.sender_key_manager = KeyManager(sender_id)
-            self.receiver_key_manager = KeyManager(receiver_id)
-
-            # Initialize QKD channel
+            # Initialize single key manager with QKD channel
             self.qkd_channel = QKDChannel(key_length=256)
+            self.key_manager = KeyManager(user_id)
 
             # Initialize encryption engine
             self.encryption_engine = EncryptionEngine()
@@ -259,16 +259,18 @@ class QuantumEmailGUI:
             # Generate RSA key pair for Level 4 encryption
             self.private_key, self.public_key = generate_rsa_keypair()
 
-            # Initialize quantum email engine
+            # Store peer_id for send operations
+            self.peer_id = peer_id
+
+            # Initialize quantum email engine with single key manager
             self.quantum_email_engine = QuantumEmailEngine(
                 self.gmail_service,
-                self.sender_key_manager,
-                self.qkd_channel,
+                self.key_manager,
                 self.encryption_engine
             )
 
-            self.status_label.config(text="Status: Initialized ✓")
-            messagebox.showinfo("Success", "System initialized successfully!")
+            self.status_label.config(text=f"Status: Initialized ✓ (as {user_id})")
+            messagebox.showinfo("Success", f"System initialized!\nIdentity: {user_id}\nPeer: {peer_id}")
 
         except Exception as e:
             self.status_label.config(text="Status: Initialization Failed")
@@ -304,6 +306,9 @@ class QuantumEmailGUI:
             self.send_status.config(text="Encrypting and sending...", foreground='orange')
             self.send_button.config(state='disabled')
 
+            # Create a peer stub for the recipient
+            peer_km = KeyManager(self.peer_id)
+
             # Send in background thread
             def send_thread():
                 result = self.quantum_email_engine.send_encrypted_email(
@@ -312,7 +317,7 @@ class QuantumEmailGUI:
                     subject=subject,
                     plaintext_content=content,
                     security_level=security_level,
-                    recipient_key_manager=self.receiver_key_manager,
+                    recipient_key_manager=peer_km,
                     recipient_public_key=self.public_key if security_level == SecurityLevel.LEVEL_4_MAXIMUM else None
                 )
 
@@ -386,7 +391,7 @@ class QuantumEmailGUI:
 
     def _decrypt_email(self):
         """
-        Decrypt the fetched email
+        Decrypt the fetched email using the same key manager
         """
         if not self.current_message_id:
             messagebox.showerror("Error", "No email to decrypt!")
@@ -395,9 +400,10 @@ class QuantumEmailGUI:
         try:
             self.receive_status.config(text="Decrypting...", foreground='orange')
 
+            # Use the same key_manager (sae-1) — it calls dec_keys via the QKD provider
             result = self.quantum_email_engine.receive_encrypted_email(
                 self.current_message_id,
-                self.receiver_key_manager,
+                self.key_manager,
                 self.private_key
             )
 
@@ -429,16 +435,17 @@ class QuantumEmailGUI:
             return
 
         try:
+            user_id = self.user_id_entry.get()
+            peer_id = self.peer_id_entry.get()
+
             quantum_key, key_id = self.qkd_channel.establish_key_pair(
-                self.sender_key_manager.manager_id,
-                self.receiver_key_manager.manager_id
+                user_id,
+                peer_id
             )
 
-            # Store in both managers
-            self.sender_key_manager.store_key(quantum_key, key_id,
-                                             {'purpose': 'manual_generation'})
-            self.receiver_key_manager.store_key(quantum_key, key_id,
-                                               {'purpose': 'manual_generation'})
+            # Store in key manager
+            self.key_manager.store_key(quantum_key, key_id,
+                                       {'purpose': 'manual_generation'})
 
             self.keys_display.insert('end', f"\n✓ Generated new key pair: {key_id}\n")
             messagebox.showinfo("Success", f"Key pair generated!\nKey ID: {key_id}")
@@ -450,42 +457,41 @@ class QuantumEmailGUI:
         """
         List all active keys
         """
-        if not self.sender_key_manager:
+        if not self.key_manager:
             messagebox.showerror("Error", "Please initialize the system first!")
             return
 
         self.keys_display.delete('1.0', 'end')
 
-        sender_keys = self.sender_key_manager.list_keys()
-        receiver_keys = self.receiver_key_manager.list_keys()
-
-        self.keys_display.insert('end', "=== SENDER KEYS ===\n")
-        for key in sender_keys:
-            self.keys_display.insert('end', f"\nKey ID: {key['key_id']}\n")
-            self.keys_display.insert('end', f"Created: {key['created_at']}\n")
-            self.keys_display.insert('end', f"Expires: {key['expires_at']}\n")
-            self.keys_display.insert('end', f"Usage: {key['usage_count']}\n")
-
-        self.keys_display.insert('end', "\n\n=== RECEIVER KEYS ===\n")
-        for key in receiver_keys:
-            self.keys_display.insert('end', f"\nKey ID: {key['key_id']}\n")
-            self.keys_display.insert('end', f"Created: {key['created_at']}\n")
-            self.keys_display.insert('end', f"Expires: {key['expires_at']}\n")
-            self.keys_display.insert('end', f"Usage: {key['usage_count']}\n")
+        self.keys_display.insert('end', "=== QUANTUM KEYS ===\n")
+        # List keys from the key manager's in-memory store
+        for key_id, entry in self.key_manager.keys.items():
+            self.keys_display.insert('end', f"\nKey ID: {entry.get('key_id', key_id)}\n")
+            self.keys_display.insert('end', f"Created: {entry.get('created_at', 'N/A')}\n")
+            self.keys_display.insert('end', f"Expires: {entry.get('expires_at', 'N/A')}\n")
+            self.keys_display.insert('end', f"Usage: {entry.get('usage_count', 0)}\n")
+            self.keys_display.insert('end', f"State: {entry.get('state', 'N/A')}\n")
 
     def _cleanup_keys(self):
         """
         Cleanup expired keys
         """
-        if not self.sender_key_manager:
+        if not self.key_manager:
             messagebox.showerror("Error", "Please initialize the system first!")
             return
 
-        sender_count = self.sender_key_manager.cleanup_expired_keys()
-        receiver_count = self.receiver_key_manager.cleanup_expired_keys()
+        # Cleanup expired keys from the single manager
+        count = 0
+        expired = []
+        for key_id, entry in self.key_manager.keys.items():
+            if entry.get('state') in ('EXPIRED', 'CONSUMED'):
+                expired.append(key_id)
 
-        total = sender_count + receiver_count
-        messagebox.showinfo("Cleanup Complete", f"Removed {total} expired keys")
+        for key_id in expired:
+            self.key_manager.delete_key(key_id)
+            count += 1
+
+        messagebox.showinfo("Cleanup Complete", f"Removed {count} expired/consumed keys")
         self._list_keys()
 
     def run(self):

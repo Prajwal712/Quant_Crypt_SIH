@@ -26,14 +26,48 @@ app = Flask(__name__)
 CORS(app)
 
 # --------------------------------------------------
+# SAE Configuration
+# --------------------------------------------------
+# Usage:
+#   python3 bridge.py           → runs as sae-1 (port 5000)
+#   python3 bridge.py sae-2     → runs as sae-2 (port 5001)
+#
+# Both instances can SEND and DECRYPT — no role guards.
+# The argument only determines which SAE identity / KME / certs to use.
+# --------------------------------------------------
+
+SAE_CONFIG = {
+    "sae-1": {
+        "my_id":    "sae-1",
+        "peer_id":  "sae-2",
+        "kme_url":  "https://kme-1.acct-3000.etsi-qkd-api.qukaydee.com",
+        "cert_dir": "alice_sender",
+        "port":     5000,
+    },
+    "sae-2": {
+        "my_id":    "sae-2",
+        "peer_id":  "sae-1",
+        "kme_url":  "https://kme-2.acct-3000.etsi-qkd-api.qukaydee.com",
+        "cert_dir": "bob_receiver",
+        "port":     5001,
+    },
+}
+
+# Pick identity from CLI arg (default: sae-1)
+IDENTITY = sys.argv[1] if len(sys.argv) > 1 else "sae-1"
+if IDENTITY not in SAE_CONFIG:
+    print(f"❌ Unknown identity '{IDENTITY}'. Use: sae-1 or sae-2")
+    sys.exit(1)
+
+CFG = SAE_CONFIG[IDENTITY]
+
+# --------------------------------------------------
 # Global state
 # --------------------------------------------------
 engine = None
-my_km = None
-peer_km = None
+key_manager = None
 initialized = False
 
-ROLE = sys.argv[1] if len(sys.argv) > 1 else "alice"
 
 # --------------------------------------------------
 # Helpers
@@ -50,28 +84,26 @@ def require_initialized():
 # --------------------------------------------------
 @app.route('/api/init', methods=['POST'])
 def initialize():
-    global engine, my_km, peer_km, initialized
+    global engine, key_manager, initialized
 
     if initialized:
         return jsonify({
             "status": "already_initialized",
-            "role": ROLE
+            "identity": CFG["my_id"]
         })
 
     try:
-        log.info(f"🔐 Initializing mTLS + QKD engine for role: {ROLE}")
+        log.info(f"🔐 Initializing QKD engine as {CFG['my_id']} (peer: {CFG['peer_id']})")
 
         # --------------------------------------------------
-        # Gmail OAuth → ONLY Alice
+        # Gmail OAuth
         # --------------------------------------------------
-        # gmail_service = None
-        # if ROLE == "alice":
-        #     gmail_service = get_gmail_service()
-
         gmail_service = get_gmail_service()
 
         # --------------------------------------------------
-        # QKD paths
+        # QKD provider — uses this identity's certs + KME
+        # enc_keys (send) and dec_keys (decrypt) both go
+        # through the same KME with the same certs.
         # --------------------------------------------------
         base_setup = os.path.join(os.getcwd(), "src", "Qukaydee_setup")
         ca_path = os.path.join(
@@ -80,47 +112,34 @@ def initialize():
             "account-3000-server-ca-qukaydee-com.crt"
         )
 
-        my_id = "sae-1" if ROLE == "alice" else "sae-2"
-        peer_id = "sae-2" if ROLE == "alice" else "sae-1"
-        role_dir = "alice_sender" if ROLE == "alice" else "bob_receiver"
-
-        kme_url = (
-            "https://kme-1.acct-3000.etsi-qkd-api.qukaydee.com"
-            if ROLE == "alice"
-            else "https://kme-2.acct-3000.etsi-qkd-api.qukaydee.com"
-        )
-
         provider = QuKayDeeProvider(
-            host=kme_url,
-            cert_path=os.path.join(base_setup, role_dir, f"{my_id}.crt"),
-            key_path=os.path.join(base_setup, role_dir, f"{my_id}.key"),
+            host=CFG["kme_url"],
+            cert_path=os.path.join(base_setup, CFG["cert_dir"], f"{CFG['my_id']}.crt"),
+            key_path=os.path.join(base_setup, CFG["cert_dir"], f"{CFG['my_id']}.key"),
             ca_path=ca_path
         )
 
-        my_km = KeyManager(
-            my_id,
+        # --------------------------------------------------
+        # Single KeyManager — both send + decrypt
+        # --------------------------------------------------
+        key_manager = KeyManager(
+            CFG["my_id"],
             qkd_provider=provider,
-            storage_path=f"./key_store/{ROLE}"
-        )
-
-        # Peer KM stub (no QKD provider on purpose)
-        peer_km = KeyManager(
-            peer_id,
-            storage_path=f"./key_store/{ROLE}_stub"
+            storage_path=f"./key_store/{CFG['my_id']}"
         )
 
         engine = QuantumEmailEngine(
             gmail_service,
-            my_km,
+            key_manager,
             EncryptionEngine()
         )
 
         initialized = True
-        log.info("✅ Backend initialization complete")
+        log.info(f"✅ Backend ready — {CFG['my_id']} on port {CFG['port']}")
 
         return jsonify({
             "status": "success",
-            "role": ROLE
+            "identity": CFG["my_id"]
         })
 
     except Exception:
@@ -140,13 +159,6 @@ def list_messages():
     if not initialized:
         return require_initialized()
 
-    # Bob NEVER touches Gmail
-    # if ROLE == "bob":
-    #     return jsonify({
-    #         "status": "success",
-    #         "emails": []
-    #     })
-
     try:
         results = engine.gmail_service.users().messages().list(
             userId='me',
@@ -160,7 +172,9 @@ def list_messages():
         for m in messages:
             msg = engine.gmail_service.users().messages().get(
                 userId='me',
-                id=m['id']
+                id=m['id'],
+                format='metadata',
+                metadataHeaders=['Subject', 'From', 'X-Quantum-Security']
             ).execute()
 
             headers = msg['payload'].get('headers', [])
@@ -189,7 +203,8 @@ def list_messages():
                 "time": "Just now",
                 "read": False,
                 "folder": "inbox",
-                "security_level": security_level
+                "security_level": security_level,
+                "is_quantum": True
             })
 
         return jsonify({
@@ -206,18 +221,12 @@ def list_messages():
 
 
 # --------------------------------------------------
-# SEND EMAIL (Alice only)
+# SEND ENCRYPTED EMAIL
 # --------------------------------------------------
 @app.route('/api/send', methods=['POST'])
 def send_mail():
     if not initialized:
         return require_initialized()
-
-    if ROLE != "alice":
-        return jsonify({
-            "status": "error",
-            "error": "Only Alice can send emails"
-        }), 403
 
     data = request.json
     if not data or not all(k in data for k in ("recipient", "subject", "body", "security")):
@@ -226,15 +235,18 @@ def send_mail():
             "error": "Invalid request payload"
         }), 400
 
-
     try:
+        # enc_keys → peer SAE
         result = engine.send_encrypted_email(
             sender="me",
             recipient=data['recipient'],
             subject=data['subject'],
             plaintext_content=data['body'],
-            security_level = SecurityLevel(int(data["security"])),
-            recipient_key_manager=peer_km
+            security_level=SecurityLevel(int(data["security"])),
+            recipient_key_manager=KeyManager(
+                CFG["peer_id"],
+                storage_path=f"./key_store/{CFG['my_id']}_peer_stub"
+            )
         )
 
         return jsonify(result)
@@ -248,18 +260,12 @@ def send_mail():
 
 
 # --------------------------------------------------
-# DECRYPT EMAIL (Bob only)
+# DECRYPT RECEIVED EMAIL
 # --------------------------------------------------
 @app.route('/api/decrypt', methods=['POST'])
 def decrypt_mail():
     if not initialized:
         return require_initialized()
-
-    if ROLE != "bob":
-        return jsonify({
-            "status": "error",
-            "error": "Only Bob can decrypt emails"
-        }), 403
 
     data = request.json
     if not data or "messageId" not in data:
@@ -269,9 +275,10 @@ def decrypt_mail():
         }), 400
 
     try:
+        # dec_keys → retrieve key that peer used to encrypt
         result = engine.receive_encrypted_email(
             message_id=data['messageId'],
-            receiver_key_manager=my_km
+            receiver_key_manager=key_manager
         )
         return jsonify(result)
 
@@ -281,7 +288,8 @@ def decrypt_mail():
             "status": "error",
             "error": "Decryption failed"
         }), 500
-    
+
+
 @app.route("/api/logout", methods=["POST"])
 def logout():
     try:
@@ -297,5 +305,7 @@ def logout():
 # RUN
 # --------------------------------------------------
 if __name__ == '__main__':
-    port = 5000 if ROLE == "alice" else 5001
-    app.run(port=port)
+    print(f"\n🚀 Starting MailQ Bridge as {CFG['my_id']} on port {CFG['port']}")
+    print(f"   Peer: {CFG['peer_id']}")
+    print(f"   KME:  {CFG['kme_url']}\n")
+    app.run(port=CFG["port"])
