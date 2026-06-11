@@ -28,44 +28,23 @@ CORS(app)
 # --------------------------------------------------
 # SAE Configuration
 # --------------------------------------------------
-# Usage:
-#   python3 bridge.py           → runs as sae-1 (port 5000)
-#   python3 bridge.py sae-2     → runs as sae-2 (port 5001)
+# Architecture:
+#   SAE-1 (kme-1, alice_sender certs) → used for ENCRYPTION on both machines
+#   SAE-2 (kme-2, bob_receiver certs) → used for DECRYPTION on both machines
 #
-# Both instances can SEND and DECRYPT — no role guards.
-# The argument only determines which SAE identity / KME / certs to use.
+# Usage:
+#   python3 bridge.py              → runs on port 5000 (default)
+#   python3 bridge.py <port>       → runs on specified port
 # --------------------------------------------------
 
-SAE_CONFIG = {
-    "sae-1": {
-        "my_id":    "sae-1",
-        "peer_id":  "sae-2",
-        "kme_url":  "https://kme-1.acct-3000.etsi-qkd-api.qukaydee.com",
-        "cert_dir": "alice_sender",
-        "port":     5000,
-    },
-    "sae-2": {
-        "my_id":    "sae-2",
-        "peer_id":  "sae-1",
-        "kme_url":  "https://kme-2.acct-3000.etsi-qkd-api.qukaydee.com",
-        "cert_dir": "bob_receiver",
-        "port":     5001,
-    },
-}
-
-# Pick identity from CLI arg (default: sae-1)
-IDENTITY = sys.argv[1] if len(sys.argv) > 1 else "sae-1"
-if IDENTITY not in SAE_CONFIG:
-    print(f"❌ Unknown identity '{IDENTITY}'. Use: sae-1 or sae-2")
-    sys.exit(1)
-
-CFG = SAE_CONFIG[IDENTITY]
+PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
 
 # --------------------------------------------------
 # Global state
 # --------------------------------------------------
 engine = None
-key_manager = None
+send_key_manager = None     # SAE-1 for encryption
+decrypt_key_manager = None  # SAE-2 for decryption
 initialized = False
 
 
@@ -84,16 +63,16 @@ def require_initialized():
 # --------------------------------------------------
 @app.route('/api/init', methods=['POST'])
 def initialize():
-    global engine, key_manager, initialized
+    global engine, send_key_manager, decrypt_key_manager, initialized
 
     if initialized:
         return jsonify({
             "status": "already_initialized",
-            "identity": CFG["my_id"]
+            "identity": "sae-1 (encrypt) / sae-2 (decrypt)"
         })
 
     try:
-        log.info(f"🔐 Initializing QKD engine as {CFG['my_id']} (peer: {CFG['peer_id']})")
+        log.info("🔐 Initializing dual-SAE QKD engine (sae-1→encrypt, sae-2→decrypt)")
 
         # --------------------------------------------------
         # Gmail OAuth
@@ -101,9 +80,7 @@ def initialize():
         gmail_service = get_gmail_service()
 
         # --------------------------------------------------
-        # QKD provider — uses this identity's certs + KME
-        # enc_keys (send) and dec_keys (decrypt) both go
-        # through the same KME with the same certs.
+        # Paths
         # --------------------------------------------------
         base_setup = os.path.join(os.getcwd(), "src", "Qukaydee_setup")
         ca_path = os.path.join(
@@ -112,34 +89,53 @@ def initialize():
             "account-3000-server-ca-qukaydee-com.crt"
         )
 
-        provider = QuKayDeeProvider(
-            host=CFG["kme_url"],
-            cert_path=os.path.join(base_setup, CFG["cert_dir"], f"{CFG['my_id']}.crt"),
-            key_path=os.path.join(base_setup, CFG["cert_dir"], f"{CFG['my_id']}.key"),
+        # --------------------------------------------------
+        # SAE-1 provider → for ENCRYPTION (enc_keys via kme-1)
+        # --------------------------------------------------
+        send_provider = QuKayDeeProvider(
+            host="https://kme-1.acct-3000.etsi-qkd-api.qukaydee.com",
+            cert_path=os.path.join(base_setup, "alice_sender", "sae-1.crt"),
+            key_path=os.path.join(base_setup, "alice_sender", "sae-1.key"),
             ca_path=ca_path
         )
 
-        # --------------------------------------------------
-        # Single KeyManager — both send + decrypt
-        # --------------------------------------------------
-        key_manager = KeyManager(
-            CFG["my_id"],
-            qkd_provider=provider,
-            storage_path=f"./key_store/{CFG['my_id']}"
+        send_key_manager = KeyManager(
+            "sae-1",
+            qkd_provider=send_provider,
+            storage_path="./key_store/sae-1"
         )
 
+        # --------------------------------------------------
+        # SAE-2 provider → for DECRYPTION (dec_keys via kme-2)
+        # --------------------------------------------------
+        decrypt_provider = QuKayDeeProvider(
+            host="https://kme-2.acct-3000.etsi-qkd-api.qukaydee.com",
+            cert_path=os.path.join(base_setup, "bob_receiver", "sae-2.crt"),
+            key_path=os.path.join(base_setup, "bob_receiver", "sae-2.key"),
+            ca_path=ca_path
+        )
+
+        decrypt_key_manager = KeyManager(
+            "sae-2",
+            qkd_provider=decrypt_provider,
+            storage_path="./key_store/sae-2"
+        )
+
+        # --------------------------------------------------
+        # Engine uses SAE-1 (send_key_manager) as the sender identity
+        # --------------------------------------------------
         engine = QuantumEmailEngine(
             gmail_service,
-            key_manager,
+            send_key_manager,
             EncryptionEngine()
         )
 
         initialized = True
-        log.info(f"✅ Backend ready — {CFG['my_id']} on port {CFG['port']}")
+        log.info(f"✅ Backend ready — sae-1 (encrypt) + sae-2 (decrypt) on port {PORT}")
 
         return jsonify({
             "status": "success",
-            "identity": CFG["my_id"]
+            "identity": "sae-1 (encrypt) / sae-2 (decrypt)"
         })
 
     except Exception:
@@ -236,7 +232,7 @@ def send_mail():
         }), 400
 
     try:
-        # enc_keys → peer SAE
+        # enc_keys → SAE-1 encrypts, peer is sae-2
         result = engine.send_encrypted_email(
             sender="me",
             recipient=data['recipient'],
@@ -244,8 +240,8 @@ def send_mail():
             plaintext_content=data['body'],
             security_level=SecurityLevel(int(data["security"])),
             recipient_key_manager=KeyManager(
-                CFG["peer_id"],
-                storage_path=f"./key_store/{CFG['my_id']}_peer_stub"
+                "sae-2",
+                storage_path="./key_store/sae-1_peer_stub"
             )
         )
 
@@ -275,10 +271,10 @@ def decrypt_mail():
         }), 400
 
     try:
-        # dec_keys → retrieve key that peer used to encrypt
+        # dec_keys → SAE-2 retrieves key that SAE-1 used to encrypt
         result = engine.receive_encrypted_email(
             message_id=data['messageId'],
-            receiver_key_manager=key_manager
+            receiver_key_manager=decrypt_key_manager
         )
         return jsonify(result)
 
@@ -305,7 +301,7 @@ def logout():
 # RUN
 # --------------------------------------------------
 if __name__ == '__main__':
-    print(f"\n🚀 Starting MailQ Bridge as {CFG['my_id']} on port {CFG['port']}")
-    print(f"   Peer: {CFG['peer_id']}")
-    print(f"   KME:  {CFG['kme_url']}\n")
-    app.run(port=CFG["port"])
+    print(f"\n🚀 Starting MailQ Bridge on port {PORT}")
+    print(f"   Encrypt: SAE-1 (kme-1) → enc_keys")
+    print(f"   Decrypt: SAE-2 (kme-2) → dec_keys\n")
+    app.run(port=PORT)

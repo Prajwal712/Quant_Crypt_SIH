@@ -4,11 +4,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // =============================
  
 
-    // Default: sae-1 on port 5000
-    // For demo: open index.html?sae-2 in a second browser → port 5001
-    const API_BASE = window.location.search.includes("sae-2")
-        ? "http://localhost:5001"
-        : "http://localhost:5000";
+    // Both machines use the same bridge (sae-1 for encrypt, sae-2 for decrypt)
+    const API_BASE = "http://localhost:5000";
 
     // =============================
     // STATE

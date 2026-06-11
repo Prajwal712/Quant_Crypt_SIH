@@ -1,7 +1,7 @@
 """
 Quantum Email GUI
 User interface for sending and receiving quantum-encrypted emails
-Single-user mode: one KeyManager (sae-1) handles both send and decrypt
+Dual-SAE mode: SAE-1 for encryption, SAE-2 for decryption on both machines
 """
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext

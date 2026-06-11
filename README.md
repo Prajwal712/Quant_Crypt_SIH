@@ -10,6 +10,22 @@ A comprehensive email encryption system utilizing **Quantum Key Distribution (QK
 
 ---
 
+## 🏗️ System Architecture
+
+![System Architecture](System_Architecture.png)
+
+The system follows a dual-SAE architecture based on the **ETSI GS QKD 014** standard:
+
+| Component | Role | Details |
+|-----------|------|---------|
+| **SAE-1 (Key Manager A)** | Encryption | Requests `enc_keys` from KME-1 on both sender & receiver machines |
+| **SAE-2 (Key Manager B)** | Decryption | Retrieves `dec_keys` from KME-2 on both sender & receiver machines |
+| **QKD Channel** | Key Sync | Synchronises quantum keys between KME-1 and KME-2 |
+| **Cryptography Module** | Encrypt/Decrypt | Supports 4 security levels (XOR → Hybrid) |
+| **Email Engine** | Transport | Sends via SMTP, receives via IMAP (Gmail API) |
+
+---
+
 ## 🔭 Overview
 
 This system implements a quantum-enhanced email encryption platform designed to secure sensitive communications against future threats.
@@ -60,18 +76,30 @@ This system implements a quantum-enhanced email encryption platform designed to 
 -   **One-Time Use:** Strict enforcement (OTP principle)
 -   **REST API:** Remote key operations
 
+### 🔄 Dual-SAE Architecture
+
+-   **SAE-1 (Encryption):** Both machines use SAE-1 identity with KME-1 to request `enc_keys`
+-   **SAE-2 (Decryption):** Both machines use SAE-2 identity with KME-2 to retrieve `dec_keys`
+-   **Symmetric Design:** No role-based restrictions — any machine can send and receive
+
 ## 📂 Project Structure
 
 ```text
 Quant_Crypt_SIH/
 ├── src/
-│   ── qkd/                  # ⚛️ BB84 QKD implementation
+│   ├── qkd/                  # ⚛️ BB84 QKD implementation
 │   ├── key_management/       # 🔑 Key lifecycle & API
 │   ├── cryptography/         # 🛡️ 4-level encryption engine
 │   ├── email_engine/         # 📧 Gmail integration
-│   └── GUI/                  # 🖥️ Tkinter User Interface
+│   ├── GUI/                  # 🖥️ Tkinter User Interface
+│   └── Qukaydee_setup/       # 🔧 SAE certificates & QKD config
+│       ├── alice_sender/     # SAE-1 certs (encryption)
+│       ├── bob_receiver/     # SAE-2 certs (decryption)
+│       └── certs/            # Root CA certificate
+├── Email_client_ui/          # 🌐 Web-based email client
+├── bridge.py                 # 🌉 REST API bridge (Flask)
 ├── examples/                 # 📚 Usage scripts
 ├── QUICKSTART.md             # 🚀 Quick start guide
+├── System_Architecture.png   # 🏗️ Architecture diagram
 └── README.md                 # 📖 Documentation
-
-
+```
