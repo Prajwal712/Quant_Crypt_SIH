@@ -17,6 +17,7 @@ Thumbs.db
 # --- Google Authentication (SENSITIVE) ---
 credentials.json
 token.json
+token_*.json
 token.pickle
 
 # --- Key Store ---

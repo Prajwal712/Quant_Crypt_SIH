@@ -6,12 +6,21 @@ from googleapiclient.discovery import build
 
 SCOPES = ['https://www.googleapis.com/auth/gmail.modify']
 
-def get_gmail_service():
+def get_gmail_service(token_path=None):
+    """
+    Authenticate and return a Gmail API service object.
+
+    Args:
+        token_path: Path to the token JSON file. Defaults to TOKEN_FILE
+                    env var, or 'token.json' in the current directory.
+    """
+    if token_path is None:
+        token_path = os.environ.get('TOKEN_FILE', 'token.json')
 
     creds = None
     
-    if os.path.exists('token.json'):
-        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+    if os.path.exists(token_path):
+        creds = Credentials.from_authorized_user_file(token_path, SCOPES)
         
     # If there are no (valid) credentials available, let the user log in.
     if not creds or not creds.valid:
@@ -24,10 +33,9 @@ def get_gmail_service():
             creds = flow.run_local_server(port=0)
             
         # Save the credentials for the next run
-        with open('token.json', 'w') as token:
+        with open(token_path, 'w') as token:
             token.write(creds.to_json())
 
     # Build and return the service object to interact with the API
     service = build('gmail', 'v1', credentials=creds)
     return service
-

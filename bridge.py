@@ -38,6 +38,7 @@ CORS(app)
 # --------------------------------------------------
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
+TOKEN_FILE = f"token_{PORT}.json"
 
 # --------------------------------------------------
 # Global state
@@ -77,7 +78,7 @@ def initialize():
         # --------------------------------------------------
         # Gmail OAuth
         # --------------------------------------------------
-        gmail_service = get_gmail_service()
+        gmail_service = get_gmail_service(token_path=TOKEN_FILE)
 
         # --------------------------------------------------
         # Paths
@@ -289,9 +290,8 @@ def decrypt_mail():
 @app.route("/api/logout", methods=["POST"])
 def logout():
     try:
-        token_path = "./token.json"
-        if os.path.exists(token_path):
-            os.remove(token_path)
+        if os.path.exists(TOKEN_FILE):
+            os.remove(TOKEN_FILE)
         return jsonify({"status": "success"})
     except Exception:
         return jsonify({"status": "error"}), 500

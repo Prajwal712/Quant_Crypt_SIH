@@ -4,8 +4,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // =============================
  
 
-    // Both machines use the same bridge (sae-1 for encrypt, sae-2 for decrypt)
-    const API_BASE = "http://localhost:5000";
+    // Configurable port for multi-account: open index.html?port=5001 for second account
+    const urlParams = new URLSearchParams(window.location.search);
+    const port = urlParams.get("port") || "5000";
+    const API_BASE = `http://localhost:${port}`;
 
     // =============================
     // STATE
