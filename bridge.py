@@ -33,20 +33,20 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "qmail-dev-secret-change-in-production")
 
 # --------------------------------------------------
-# CORS — allow credentials (cookies) from frontend
+# CORS — allow Authorization header from frontend
 # --------------------------------------------------
 FRONTEND_ORIGIN = os.environ.get(
     "FRONTEND_ORIGIN",
     "https://quant-crypt-sih.vercel.app"
 )
 
-CORS(app, supports_credentials=True, origins=[
+CORS(app, origins=[
     FRONTEND_ORIGIN,
     "http://localhost:5000",
     "http://localhost:8080",
     "http://127.0.0.1:5000",
     "http://127.0.0.1:8080",
-])
+], allow_headers=["Content-Type", "Authorization"])
 
 # Render sets RENDER=true automatically on their servers
 IS_RENDER = os.environ.get("RENDER") == "true"

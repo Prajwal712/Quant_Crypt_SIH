@@ -10,4 +10,8 @@ if [ -z "$FLASK_SECRET_KEY" ]; then
 fi
 
 # 2. Start the application with Gunicorn
-exec gunicorn -w 2 -b 0.0.0.0:$PORT bridge:app
+#    IMPORTANT: Must use -w 1 (single worker) because user_sessions
+#    is an in-memory dict. Multiple workers = separate memory = sessions
+#    created in one worker are invisible to the others.
+#    For multi-worker support, migrate to Redis session storage.
+exec gunicorn -w 1 --threads 4 -b 0.0.0.0:$PORT bridge:app
