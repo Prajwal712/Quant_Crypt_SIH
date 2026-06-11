@@ -5,9 +5,9 @@ document.addEventListener('DOMContentLoaded', () => {
  
 
     // Configurable port for multi-account: open index.html?port=5001 for second account
-    const urlParams = new URLSearchParams(window.location.search);
-    const port = urlParams.get("port") || "5000";
-    const API_BASE = `http://localhost:${port}`;
+    const API_BASE = window.location.hostname === "localhost"
+    ? `http://localhost:${new URLSearchParams(window.location.search).get("port") || "5000"}`
+    : "https://quantum-mail-api.onrender.com";
 
     // =============================
     // STATE
