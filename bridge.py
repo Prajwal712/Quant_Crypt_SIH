@@ -23,7 +23,7 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("MailQ-Bridge")
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=["https://quant-crypt-sih.vercel.app", "http://localhost:5000"])
 
 # --------------------------------------------------
 # SAE Configuration
