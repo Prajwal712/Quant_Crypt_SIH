@@ -1,3 +1,4 @@
+import os
 import os.path
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -17,6 +18,12 @@ def get_gmail_service(token_path=None):
     if token_path is None:
         token_path = os.environ.get('TOKEN_FILE', 'token.json')
 
+    # Resolve credentials.json path (Render mounts secrets at /etc/secrets/)
+    if os.environ.get("RENDER") == "true":
+        creds_path = "/etc/secrets/credentials.json"
+    else:
+        creds_path = "credentials.json"
+
     creds = None
     
     if os.path.exists(token_path):
@@ -29,7 +36,7 @@ def get_gmail_service(token_path=None):
         else:
             # This will trigger the browser-based authentication flow.
             flow = InstalledAppFlow.from_client_secrets_file(
-                'credentials.json', SCOPES)
+                creds_path, SCOPES)
             creds = flow.run_local_server(port=0)
             
         # Save the credentials for the next run
@@ -39,3 +46,4 @@ def get_gmail_service(token_path=None):
     # Build and return the service object to interact with the API
     service = build('gmail', 'v1', credentials=creds)
     return service
+

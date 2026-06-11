@@ -1,17 +1,13 @@
 #!/bin/bash
 
-# 1. Create the directories your code expects
-mkdir -p src/Qukaydee_setup/alice_sender/
-mkdir -p src/Qukaydee_setup/bob_receiver/
-mkdir -p src/Qukaydee_setup/certs/
+# Render Start Script
+# Since bridge.py now auto-detects Render via the RENDER env var
+# and reads certs from /etc/secrets/, this script only needs to
+# handle the token file and start gunicorn.
 
-# 2. Copy the secrets from Render's secure folder to your project folders
-cp /etc/secrets/sae-1.crt src/Qukaydee_setup/alice_sender/
-cp /etc/secrets/sae-1.key src/Qukaydee_setup/alice_sender/
-cp /etc/secrets/sae-2.crt src/Qukaydee_setup/bob_receiver/
-cp /etc/secrets/sae-2.key src/Qukaydee_setup/bob_receiver/
-cp /etc/secrets/account-3000-server-ca-qukaydee-com.crt src/Qukaydee_setup/certs/
-cp /etc/secrets/token.json ./token.json
+# 1. Copy token from /etc/secrets/ to working directory
+#    (bridge.py reads it via TOKEN_FILE env var)
+cp /etc/secrets/token.json ./token.json 2>/dev/null || echo "⚠️  No token.json in /etc/secrets/"
 
-# 3. Start your application
-python3 bridge.py
+# 2. Start the application with Gunicorn
+exec gunicorn -w 2 -b 0.0.0.0:$PORT bridge:app

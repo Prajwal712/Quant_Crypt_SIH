@@ -40,6 +40,9 @@ CORS(app, origins=["https://quant-crypt-sih.vercel.app", "http://localhost:5000"
 PORT = int(os.environ.get("PORT", sys.argv[1] if len(sys.argv) > 1 else 5000))
 TOKEN_FILE = os.environ.get("TOKEN_FILE", f"token_{PORT}.json")
 
+# Render sets RENDER=true automatically on their servers
+IS_RENDER = os.environ.get("RENDER") == "true"
+
 
 # --------------------------------------------------
 # Global state
@@ -60,6 +63,19 @@ def require_initialized():
     }), 400
 
 
+def _cert_path(filename):
+    """
+    Resolve a certificate file path.
+    On Render: /etc/secrets/<filename>   (flat mount)
+    Locally:   returned as-is            (nested directory)
+    """
+    if IS_RENDER:
+        # Render Secret Files are mounted flat under /etc/secrets/
+        flat_name = os.path.basename(filename)
+        return f"/etc/secrets/{flat_name}"
+    return filename
+
+
 # --------------------------------------------------
 # INIT
 # --------------------------------------------------
@@ -75,6 +91,8 @@ def initialize():
 
     try:
         log.info("🔐 Initializing dual-SAE QKD engine (sae-1→encrypt, sae-2→decrypt)")
+        if IS_RENDER:
+            log.info("   📦 Running on Render — reading certs from /etc/secrets/")
 
         # --------------------------------------------------
         # Gmail OAuth
@@ -82,23 +100,20 @@ def initialize():
         gmail_service = get_gmail_service(token_path=TOKEN_FILE)
 
         # --------------------------------------------------
-        # Paths
+        # Paths — resolved via _cert_path() for Render compat
         # --------------------------------------------------
         base_setup = os.path.join(os.getcwd(), "src", "Qukaydee_setup")
-        ca_path = os.path.join(
-            base_setup,
-            "certs",
-            "account-3000-server-ca-qukaydee-com.crt"
-        )
+
+        ca_file = os.path.join(base_setup, "certs", "account-3000-server-ca-qukaydee-com.crt")
 
         # --------------------------------------------------
         # SAE-1 provider → for ENCRYPTION (enc_keys via kme-1)
         # --------------------------------------------------
         send_provider = QuKayDeeProvider(
             host="https://kme-1.acct-3000.etsi-qkd-api.qukaydee.com",
-            cert_path=os.path.join(base_setup, "alice_sender", "sae-1.crt"),
-            key_path=os.path.join(base_setup, "alice_sender", "sae-1.key"),
-            ca_path=ca_path
+            cert_path=_cert_path(os.path.join(base_setup, "alice_sender", "sae-1.crt")),
+            key_path=_cert_path(os.path.join(base_setup, "alice_sender", "sae-1.key")),
+            ca_path=_cert_path(ca_file)
         )
 
         send_key_manager = KeyManager(
@@ -112,9 +127,9 @@ def initialize():
         # --------------------------------------------------
         decrypt_provider = QuKayDeeProvider(
             host="https://kme-2.acct-3000.etsi-qkd-api.qukaydee.com",
-            cert_path=os.path.join(base_setup, "bob_receiver", "sae-2.crt"),
-            key_path=os.path.join(base_setup, "bob_receiver", "sae-2.key"),
-            ca_path=ca_path
+            cert_path=_cert_path(os.path.join(base_setup, "bob_receiver", "sae-2.crt")),
+            key_path=_cert_path(os.path.join(base_setup, "bob_receiver", "sae-2.key")),
+            ca_path=_cert_path(ca_file)
         )
 
         decrypt_key_manager = KeyManager(
