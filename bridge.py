@@ -32,6 +32,13 @@ log = logging.getLogger("MailQ-Bridge")
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "qmail-dev-secret-change-in-production")
 
+# Cross-domain cookie settings (Vercel frontend ↔ Render backend)
+app.config.update(
+    SESSION_COOKIE_SAMESITE='None',
+    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_HTTPONLY=True,
+)
+
 # --------------------------------------------------
 # CORS — allow credentials (cookies) from frontend
 # --------------------------------------------------
@@ -225,8 +232,9 @@ def auth_google():
             prompt='consent'
         )
 
-        # Store state in session for CSRF protection
+        # Store state AND code_verifier in session for CSRF + PKCE
         session['oauth_state'] = state
+        session['code_verifier'] = flow.code_verifier
 
         return jsonify({
             "status": "success",
@@ -250,15 +258,20 @@ def auth_callback():
         if not code:
             return jsonify({"status": "error", "error": "No authorization code"}), 400
 
+        # Retrieve PKCE code_verifier and state from session
+        saved_state = session.get('oauth_state')
+        code_verifier = session.get('code_verifier')
+
         client_config = _load_client_config()
         flow = Flow.from_client_config(
             client_config,
             scopes=SCOPES,
+            state=saved_state,
             redirect_uri=_get_oauth_redirect_uri()
         )
 
-        # Exchange code for tokens
-        flow.fetch_token(code=code)
+        # Exchange code for tokens — pass code_verifier to complete PKCE
+        flow.fetch_token(code=code, code_verifier=code_verifier)
         creds = flow.credentials
 
         # Get user info
