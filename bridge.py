@@ -226,15 +226,24 @@ def auth_google():
             redirect_uri=_get_oauth_redirect_uri()
         )
 
-        auth_url, state = flow.authorization_url(
+        # 1. Generate the standard auth URL and state
+        auth_url, original_state = flow.authorization_url(
             access_type='offline',
             include_granted_scopes='true',
             prompt='consent'
         )
 
-        # Store state AND code_verifier in session for CSRF + PKCE
-        session['oauth_state'] = state
-        session['code_verifier'] = flow.code_verifier
+        # 2. Append the code_verifier to the state string 
+        # This completely bypasses the need for cross-domain cookies
+        passthrough_state = f"{original_state}---{flow.code_verifier}"
+
+        # 3. Regenerate the URL with the new combined state string
+        auth_url, _ = flow.authorization_url(
+            access_type='offline',
+            include_granted_scopes='true',
+            prompt='consent',
+            state=passthrough_state
+        )
 
         return jsonify({
             "status": "success",
@@ -258,26 +267,33 @@ def auth_callback():
         if not code:
             return jsonify({"status": "error", "error": "No authorization code"}), 400
 
-        # Retrieve PKCE code_verifier and state from session
-        saved_state = session.get('oauth_state')
-        code_verifier = session.get('code_verifier')
+        # 1. Grab the combined state parameter from the incoming Google redirect
+        incoming_state = request.args.get('state', '')
+
+        # 2. Extract the code_verifier back out of the state string
+        if "---" in incoming_state:
+            original_state, code_verifier = incoming_state.split("---", 1)
+        else:
+            log.error("Invalid state parameter: missing code verifier delimiter.")
+            return redirect(f"{FRONTEND_ORIGIN}?auth=error")
 
         client_config = _load_client_config()
         flow = Flow.from_client_config(
             client_config,
             scopes=SCOPES,
-            state=saved_state,
+            state=incoming_state,  # Must pass the exact combined string back to the flow
             redirect_uri=_get_oauth_redirect_uri()
         )
 
-        # Exchange code for tokens — pass code_verifier to complete PKCE
+        # 3. Exchange code for tokens using the extracted verifier
         flow.fetch_token(code=code, code_verifier=code_verifier)
         creds = flow.credentials
 
         # Get user info
         user_info = _get_user_info(creds)
 
-        # Create session
+        # Create authenticated user session (now safe to set cookies because
+        # we are about to redirect back to the frontend)
         sid = str(uuid.uuid4())
         session['sid'] = sid
         session.permanent = True
@@ -295,13 +311,11 @@ def auth_callback():
         log.info(f"✅ User signed in: {user_info.get('email')}")
 
         # Redirect back to frontend
-        frontend_url = FRONTEND_ORIGIN
-        return redirect(f"{frontend_url}?auth=success")
+        return redirect(f"{FRONTEND_ORIGIN}?auth=success")
 
     except Exception:
         log.error(traceback.format_exc())
-        frontend_url = FRONTEND_ORIGIN
-        return redirect(f"{frontend_url}?auth=error")
+        return redirect(f"{FRONTEND_ORIGIN}?auth=error")
 
 
 # --------------------------------------------------
