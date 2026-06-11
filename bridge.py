@@ -32,13 +32,6 @@ log = logging.getLogger("MailQ-Bridge")
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "qmail-dev-secret-change-in-production")
 
-# Cross-domain cookie settings (Vercel frontend ↔ Render backend)
-app.config.update(
-    SESSION_COOKIE_SAMESITE='None',
-    SESSION_COOKIE_SECURE=True,
-    SESSION_COOKIE_HTTPONLY=True,
-)
-
 # --------------------------------------------------
 # CORS — allow credentials (cookies) from frontend
 # --------------------------------------------------
@@ -126,7 +119,14 @@ user_sessions = {}  # session_id -> { creds_json, user_info, engine, decrypted_c
 
 
 def _get_session_id():
-    """Get session ID from Flask session."""
+    """
+    Get session ID from the Authorization: Bearer <token> header.
+    Falls back to Flask session cookie for local dev.
+    """
+    auth_header = request.headers.get('Authorization', '')
+    if auth_header.startswith('Bearer '):
+        return auth_header[7:]
+    # Fallback: Flask session cookie (works for same-domain / local dev)
     return session.get("sid")
 
 
@@ -216,7 +216,9 @@ def _ensure_qkd():
 def auth_google():
     """
     Start Google OAuth flow.
-    Frontend redirects the user's browser here.
+    Browser navigates directly here (top-level navigation, NOT fetch).
+    This is critical: top-level navigation makes the browser treat
+    Render as a first-party context, so cookies survive.
     """
     try:
         client_config = _load_client_config()
@@ -233,8 +235,9 @@ def auth_google():
             prompt='consent'
         )
 
-        # 2. Append the code_verifier to the state string 
-        # This completely bypasses the need for cross-domain cookies
+        # 2. Append the code_verifier to the state string
+        #    This bypasses the need for cross-domain session cookies
+        #    between the /auth/google and /auth/callback requests
         passthrough_state = f"{original_state}---{flow.code_verifier}"
 
         # 3. Regenerate the URL with the new combined state string
@@ -245,14 +248,13 @@ def auth_google():
             state=passthrough_state
         )
 
-        return jsonify({
-            "status": "success",
-            "auth_url": auth_url
-        })
+        # Direct redirect (NOT a JSON response) — this is a top-level
+        # navigation so the browser treats us as first-party
+        return redirect(auth_url)
 
     except Exception:
         log.error(traceback.format_exc())
-        return jsonify({"status": "error", "error": "Failed to start OAuth flow"}), 500
+        return redirect(f"{FRONTEND_ORIGIN}?auth=error")
 
 
 @app.route('/api/auth/callback', methods=['GET'])
@@ -292,11 +294,9 @@ def auth_callback():
         # Get user info
         user_info = _get_user_info(creds)
 
-        # Create authenticated user session (now safe to set cookies because
-        # we are about to redirect back to the frontend)
+        # Create a session token (this is sent to the frontend via URL,
+        # NOT via a cookie — completely avoids cross-domain cookie issues)
         sid = str(uuid.uuid4())
-        session['sid'] = sid
-        session.permanent = True
 
         user_sessions[sid] = {
             'creds_json': creds.to_json(),
@@ -310,8 +310,10 @@ def auth_callback():
 
         log.info(f"✅ User signed in: {user_info.get('email')}")
 
-        # Redirect back to frontend
-        return redirect(f"{FRONTEND_ORIGIN}?auth=success")
+        # Redirect to frontend with session token in the URL.
+        # The frontend stores this in sessionStorage and sends it
+        # as Authorization: Bearer <token> on every API call.
+        return redirect(f"{FRONTEND_ORIGIN}?auth=success&token={sid}")
 
     except Exception:
         log.error(traceback.format_exc())
@@ -612,7 +614,6 @@ def logout():
             del user_sessions[sid]
             log.info(f"👋 User signed out: {email}")
 
-        session.clear()
         return jsonify({"status": "success"})
     except Exception:
         log.error(traceback.format_exc())

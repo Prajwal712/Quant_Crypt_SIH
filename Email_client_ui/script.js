@@ -9,6 +9,33 @@ document.addEventListener('DOMContentLoaded', () => {
         : "https://quantum-mail-api.onrender.com";
 
     // =============================
+    // SESSION TOKEN MANAGEMENT
+    // Token is stored in sessionStorage (survives page reloads,
+    // cleared when tab is closed). Sent as Authorization: Bearer header.
+    // This completely avoids cross-domain cookie issues.
+    // =============================
+    function getToken() {
+        return sessionStorage.getItem('qmail_token');
+    }
+
+    function setToken(token) {
+        sessionStorage.setItem('qmail_token', token);
+    }
+
+    function clearToken() {
+        sessionStorage.removeItem('qmail_token');
+    }
+
+    function authHeaders() {
+        const token = getToken();
+        const headers = {};
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+        return headers;
+    }
+
+    // =============================
     // STATE
     // =============================
     const state = {
@@ -53,35 +80,48 @@ document.addEventListener('DOMContentLoaded', () => {
     const filterToggle = document.getElementById('filterToggle');
 
     // =============================
-    // CHECK AUTH ON PAGE LOAD
+    // HANDLE OAuth CALLBACK + PAGE LOAD
     // =============================
-    checkAuthStatus();
-
-    // Handle OAuth callback redirect
     const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get('auth') === 'success') {
-        // Remove the query param from URL
+
+    if (urlParams.get('auth') === 'success' && urlParams.get('token')) {
+        // OAuth callback just landed — save the token
+        setToken(urlParams.get('token'));
+        // Clean the URL
         window.history.replaceState({}, document.title, window.location.pathname);
+        // Proceed to login
         checkAuthStatus();
     } else if (urlParams.get('auth') === 'error') {
         window.history.replaceState({}, document.title, window.location.pathname);
         showLoginError('Authentication failed. Please try again.');
+    } else {
+        // Normal page load — check if we have a valid token
+        checkAuthStatus();
     }
 
     async function checkAuthStatus() {
+        const token = getToken();
+        if (!token) {
+            // No token stored, stay on login screen
+            return;
+        }
+
         try {
             const res = await fetch(`${API_BASE}/api/me`, {
-                credentials: 'include'
+                headers: authHeaders()
             });
             const data = await res.json();
 
             if (data.status === 'success' && data.user) {
-                // User is already authenticated
+                // Token is valid — log the user in
                 await loginUser(data.user);
+            } else {
+                // Token is invalid/expired — clear it
+                clearToken();
             }
         } catch (err) {
-            // Not authenticated, stay on login screen
-            console.log('Not authenticated');
+            console.log('Auth check failed:', err.message);
+            // Don't clear token on network error (server might be waking up)
         }
     }
 
@@ -113,19 +153,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // =============================
-    // API HELPERS
+    // API HELPERS (all use Bearer token)
     // =============================
     async function apiInit() {
         const res = await fetch(`${API_BASE}/api/init`, {
             method: "POST",
-            credentials: 'include'
+            headers: authHeaders()
         });
         return res.json();
     }
 
     async function apiListEmails(filter = 'quantum') {
         const res = await fetch(`${API_BASE}/api/list?filter=${filter}`, {
-            credentials: 'include'
+            headers: authHeaders()
         });
         return res.json();
     }
@@ -133,8 +173,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function apiSendEmail(payload) {
         const res = await fetch(`${API_BASE}/api/send`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: 'include',
+            headers: { "Content-Type": "application/json", ...authHeaders() },
             body: JSON.stringify(payload)
         });
         return res.json();
@@ -143,40 +182,29 @@ document.addEventListener('DOMContentLoaded', () => {
     async function apiDecrypt(messageId) {
         const res = await fetch(`${API_BASE}/api/decrypt`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: 'include',
+            headers: { "Content-Type": "application/json", ...authHeaders() },
             body: JSON.stringify({ messageId })
         });
         return res.json();
     }
 
     // =============================
-    // LOGIN — Google OAuth Flow
+    // LOGIN — Direct Browser Navigation (NOT fetch)
     // =============================
-    loginBtn.addEventListener('click', async () => {
+    loginBtn.addEventListener('click', () => {
         loginBtn.disabled = true;
         loginBtn.innerHTML = `
             <div class="btn-spinner"></div>
-            Connecting to Google...
+            Redirecting to Google...
         `;
 
-        try {
-            const res = await fetch(`${API_BASE}/api/auth/google`, {
-                credentials: 'include'
-            });
-            const data = await res.json();
-
-            if (data.status === 'success' && data.auth_url) {
-                // Redirect user to Google OAuth consent screen
-                window.location.href = data.auth_url;
-            } else {
-                showLoginError('Failed to start sign-in. Please try again.');
-                resetLoginBtn();
-            }
-        } catch (err) {
-            showLoginError('Could not connect to server. Is the backend running?');
-            resetLoginBtn();
-        }
+        // Direct top-level navigation to the backend's OAuth endpoint.
+        // This is critical: the browser treats this as a first-party
+        // navigation, so cookies set by Render are accepted.
+        // The backend will redirect to Google, then Google redirects
+        // back to the backend callback, which redirects to the frontend
+        // with ?auth=success&token=<session_token>
+        window.location.href = `${API_BASE}/api/auth/google`;
     });
 
     function resetLoginBtn() {
@@ -248,7 +276,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function loadDecryptedCache() {
         try {
             const res = await fetch(`${API_BASE}/api/decrypted-cache`, {
-                credentials: 'include'
+                headers: authHeaders()
             });
             const data = await res.json();
             if (data.status === 'success') {
@@ -276,9 +304,11 @@ document.addEventListener('DOMContentLoaded', () => {
     logoutBtn.addEventListener('click', async () => {
         await fetch(`${API_BASE}/api/logout`, {
             method: "POST",
-            credentials: 'include'
+            headers: authHeaders()
         });
 
+        // Clear local state
+        clearToken();
         state.currentUser = null;
         state.emails = [];
         state.decryptedCache = {};
@@ -379,7 +409,7 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('recipientEmail').value = '';
             document.getElementById('emailSubject').value = '';
 
-            // 🔥 Force UI refresh if user is in Sent
+            // Force UI refresh if user is in Sent
             if (state.currentFolder === "sent") {
                 renderEmailList();
             }
