@@ -1,5 +1,6 @@
 import os
 import os.path
+import json
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -10,6 +11,7 @@ SCOPES = ['https://www.googleapis.com/auth/gmail.modify']
 def get_gmail_service(token_path=None):
     """
     Authenticate and return a Gmail API service object.
+    Used for local development / CLI usage.
 
     Args:
         token_path: Path to the token JSON file. Defaults to TOKEN_FILE
@@ -47,3 +49,45 @@ def get_gmail_service(token_path=None):
     service = build('gmail', 'v1', credentials=creds)
     return service
 
+
+def get_gmail_service_from_credentials(creds):
+    """
+    Build a Gmail service from pre-existing Credentials object.
+    Used by the web OAuth flow in bridge.py.
+
+    Args:
+        creds: A google.oauth2.credentials.Credentials object.
+
+    Returns:
+        A Gmail API service object.
+    """
+    if creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+
+    service = build('gmail', 'v1', credentials=creds)
+    return service
+
+
+def get_gmail_service_from_token_json(token_json_str, scopes=None):
+    """
+    Build a Gmail service from a token JSON string.
+    Used for session-based authentication.
+
+    Args:
+        token_json_str: JSON string containing OAuth credentials.
+        scopes: List of scopes. Defaults to SCOPES.
+
+    Returns:
+        Tuple of (Gmail API service, updated Credentials object).
+    """
+    if scopes is None:
+        scopes = SCOPES
+
+    token_data = json.loads(token_json_str)
+    creds = Credentials.from_authorized_user_info(token_data, scopes)
+
+    if creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+
+    service = build('gmail', 'v1', credentials=creds)
+    return service, creds
